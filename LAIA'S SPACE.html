@@ -5,12 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LAIA'S SPACE</title>
 
-  <!-- SQLite via sql.js (WASM) — runs 100% in browser, no server needed -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
 
   <!-- ═══════════════════════════════════════════════════════════
-       DB  —  SQLite wrapper (sql.js WASM)
-       All persistence lives here. Nothing else touches _db.
+       DB  —  SQLite wrapper
+       Totes les lectures/escriptures passen per aquí.
   ═══════════════════════════════════════════════════════════ -->
   <script>
   'use strict';
@@ -21,7 +20,6 @@
     STORAGE_KEY : 'laia_sqlitedb',
     MAX_PHOTOS  : 9,
 
-    /* ── Init ─────────────────────────────────────────────── */
     async init() {
       const SQL = await initSqlJs({
         locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}`
@@ -32,13 +30,12 @@
         try {
           const bytes = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
           _db = new SQL.Database(bytes);
-        } catch {
-          _db = new SQL.Database();
-        }
+        } catch { _db = new SQL.Database(); }
       } else {
         _db = new SQL.Database();
       }
 
+      /* Taules base */
       _db.run(`
         CREATE TABLE IF NOT EXISTS todos (
           id          TEXT PRIMARY KEY,
@@ -56,42 +53,42 @@
         );
       `);
 
+      /* Columnes Fase 1 — ALTER TABLE és idempotent gràcies al try/catch */
+      try { _db.run("ALTER TABLE todos ADD COLUMN notes TEXT DEFAULT ''"); } catch {}
+      try { _db.run("ALTER TABLE todos ADD COLUMN tags  TEXT DEFAULT ''"); } catch {}
+      try { _db.run("ALTER TABLE todos ADD COLUMN color TEXT");            } catch {}
+      try { _db.run("ALTER TABLE todos ADD COLUMN time  TEXT");            } catch {}
+
       if (!saved) this._migrate();
       this._save();
     },
 
-    /* ── Internal helpers ─────────────────────────────────── */
     _migrate() {
       try {
-        const oldTodos  = JSON.parse(localStorage.getItem('laia_todos')  || '[]');
-        const oldPhotos = JSON.parse(localStorage.getItem('laia_photos') || '[]');
-
-        oldTodos.forEach(t => {
+        const ot = JSON.parse(localStorage.getItem('laia_todos')  || '[]');
+        const op = JSON.parse(localStorage.getItem('laia_photos') || '[]');
+        ot.forEach(t => {
           try {
             _db.run(
-              'INSERT OR IGNORE INTO todos VALUES (?,?,?,?,?,?,?)',
+              'INSERT OR IGNORE INTO todos (id,text,completed,date,priority,createdAt,completedAt,notes,tags,color,time) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
               [t.id, t.text, t.completed ? 1 : 0, t.date || null,
-               t.priority || 'normal', t.createdAt, t.completedAt || null]
+               t.priority || 'normal', t.createdAt, t.completedAt || null,
+               '', '', null, null]
             );
-          } catch { /* ignore duplicates */ }
+          } catch {}
         });
-
-        oldPhotos.forEach(p => {
-          try {
-            _db.run('INSERT OR IGNORE INTO photos VALUES (?,?,?)',
-              [p.id, p.src, p.addedAt]);
-          } catch { /* ignore duplicates */ }
+        op.forEach(p => {
+          try { _db.run('INSERT OR IGNORE INTO photos VALUES (?,?,?)', [p.id, p.src, p.addedAt]); } catch {}
         });
-
-        if (oldTodos.length || oldPhotos.length) {
+        if (ot.length || op.length) {
           localStorage.removeItem('laia_todos');
           localStorage.removeItem('laia_photos');
         }
-      } catch { /* migration is best-effort */ }
+      } catch {}
     },
 
     _save() {
-      const data  = _db.export();
+      const data = _db.export();
       const chunk = 32768;
       let str = '';
       for (let i = 0; i < data.length; i += chunk)
@@ -116,15 +113,15 @@
                  .map(t => ({ ...t, completed: !!t.completed }));
     },
 
-    addTodo(text, date = null, priority = 'normal') {
+    addTodo(text, date = null, priority = 'normal', notes = '', tags = '', color = null, time = null) {
       const id        = Date.now().toString(36) + Math.random().toString(36).slice(2);
       const createdAt = new Date().toISOString();
       _db.run(
-        'INSERT INTO todos (id,text,completed,date,priority,createdAt,completedAt) VALUES (?,?,0,?,?,?,NULL)',
-        [id, text, date, priority, createdAt]
+        'INSERT INTO todos (id,text,completed,date,priority,createdAt,completedAt,notes,tags,color,time) VALUES (?,?,0,?,?,?,NULL,?,?,?,?)',
+        [id, text, date, priority, createdAt, notes, tags, color, time]
       );
       this._save();
-      return { id, text, completed: false, date, priority, createdAt, completedAt: null };
+      return { id, text, completed: false, date, priority, createdAt, completedAt: null, notes, tags, color, time };
     },
 
     toggleTodo(id) {
@@ -132,8 +129,7 @@
       if (!todo) return null;
       const completed   = todo.completed ? 0 : 1;
       const completedAt = completed ? new Date().toISOString() : null;
-      _db.run('UPDATE todos SET completed=?,completedAt=? WHERE id=?',
-              [completed, completedAt, id]);
+      _db.run('UPDATE todos SET completed=?,completedAt=? WHERE id=?', [completed, completedAt, id]);
       this._save();
       return { ...todo, completed: !!completed, completedAt };
     },
@@ -148,17 +144,17 @@
       if (!todo) return null;
       const m = { ...todo, ...updates };
       _db.run(
-        'UPDATE todos SET text=?,completed=?,date=?,priority=?,completedAt=? WHERE id=?',
-        [m.text, m.completed ? 1 : 0, m.date, m.priority, m.completedAt, id]
+        'UPDATE todos SET text=?,completed=?,date=?,priority=?,completedAt=?,notes=?,tags=?,color=?,time=? WHERE id=?',
+        [m.text, m.completed ? 1 : 0, m.date, m.priority, m.completedAt,
+         m.notes || '', m.tags || '', m.color || null, m.time || null, id]
       );
       this._save();
       return m;
     },
 
     getTodosByDate(dateStr) {
-      return this._rows(
-        'SELECT * FROM todos WHERE date=? ORDER BY createdAt DESC', [dateStr]
-      ).map(t => ({ ...t, completed: !!t.completed }));
+      return this._rows('SELECT * FROM todos WHERE date=? ORDER BY createdAt DESC', [dateStr])
+                 .map(t => ({ ...t, completed: !!t.completed }));
     },
 
     clearCompleted() {
@@ -182,17 +178,14 @@
     getPhotos() {
       return this._rows('SELECT * FROM photos ORDER BY addedAt ASC');
     },
-
     addPhoto(dataUrl) {
       if (this.getPhotos().length >= this.MAX_PHOTOS) return null;
-      const id      = Date.now().toString(36);
+      const id = Date.now().toString(36);
       const addedAt = new Date().toISOString();
-      _db.run('INSERT INTO photos (id,src,addedAt) VALUES (?,?,?)',
-              [id, dataUrl, addedAt]);
+      _db.run('INSERT INTO photos VALUES (?,?,?)', [id, dataUrl, addedAt]);
       this._save();
       return { id, src: dataUrl, addedAt };
     },
-
     deletePhoto(id) {
       _db.run('DELETE FROM photos WHERE id=?', [id]);
       this._save();
@@ -200,18 +193,13 @@
   };
   </script>
 
-  <!-- ═══════════════════════════════════════════════════════════
-       STYLES
-  ═══════════════════════════════════════════════════════════ -->
   <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   /* ── Tokens ─────────────────────────────────────────────── */
   :root {
     --bg          : #F2F5F8;
-    --bg2         : #E6EBF0;
     --card        : rgba(247, 250, 253, 0.96);
-    --card2       : rgba(242, 246, 250, 0.98);
     --amber       : #C8922A;
     --amber-lt    : #8A6010;
     --amber-dim   : #6A4808;
@@ -223,12 +211,10 @@
     --border      : rgba(110, 128, 144, .22);
     --border-h    : rgba(200, 146,  42, .52);
     --glow        : 0 4px 20px rgba(110, 128, 144, .14);
-    --glow-strong : 0 6px 36px rgba(200, 146,  42, .22);
   }
 
   /* ── Base ────────────────────────────────────────────────── */
   html { scroll-behavior: smooth; }
-
   body {
     font-family : 'Segoe UI', system-ui, sans-serif;
     background  : var(--bg);
@@ -239,614 +225,376 @@
 
   /* ── Loading overlay ─────────────────────────────────────── */
   .loading-overlay {
-    position        : fixed; inset: 0; z-index: 9999;
-    background      : var(--bg);
-    display         : flex; flex-direction: column;
-    align-items     : center; justify-content: center;
-    gap             : 1.2rem;
-    font-family     : 'Segoe UI', system-ui, sans-serif;
+    position    : fixed; inset: 0; z-index: 9999;
+    background  : var(--bg);
+    display     : flex; flex-direction: column;
+    align-items : center; justify-content: center; gap: 1.2rem;
+    font-family : inherit;
   }
-
-  .loading-overlay p {
-    color           : var(--cream-muted);
-    font-size       : .82rem;
-    letter-spacing  : 3px;
-    text-transform  : uppercase;
-  }
-
+  .loading-overlay p { color: var(--cream-muted); font-size: .82rem; letter-spacing: 3px; text-transform: uppercase; }
   @keyframes loadingPulse {
-    0%, 100% { transform: rotate(-8deg) scale(1); }
-    50%       { transform: rotate( 8deg) scale(1.08); }
+    0%,100% { transform: rotate(-8deg) scale(1); }
+    50%     { transform: rotate( 8deg) scale(1.08); }
   }
 
-  /* ── Floating paw background ─────────────────────────────── */
-  #paws-bg {
-    position       : fixed; inset: 0;
-    pointer-events : none; z-index: 0;
-    overflow       : hidden;
-  }
-
-  .fp {
-    position         : absolute; bottom: -80px;
-    opacity          : 0; fill: var(--amber);
-    animation        : risePaw linear infinite;
-  }
-
+  /* ── Paws background ─────────────────────────────────────── */
+  #paws-bg { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+  .fp { position: absolute; bottom: -80px; opacity: 0; fill: var(--amber); animation: risePaw linear infinite; }
   @keyframes risePaw {
-    0%   { opacity: 0;    transform: translateY(0)       rotate(0deg)   scale(1);   }
-    8%   { opacity: 0.07; }
-    92%  { opacity: 0.03; }
-    100% { opacity: 0;    transform: translateY(-115vh)  rotate(380deg) scale(0.6); }
+    0%  { opacity: 0;    transform: translateY(0)      rotate(0deg)   scale(1); }
+    8%  { opacity: .07; }
+    92% { opacity: .03; }
+    100%{ opacity: 0;    transform: translateY(-115vh) rotate(380deg) scale(.6); }
   }
-
-  .fp:nth-child(1)  { left:  4%; width: 28px; animation-duration: 20s; animation-delay:  0s; }
-  .fp:nth-child(2)  { left: 12%; width: 18px; animation-duration: 26s; animation-delay:  3s; }
-  .fp:nth-child(3)  { left: 22%; width: 36px; animation-duration: 17s; animation-delay:  7s; }
-  .fp:nth-child(4)  { left: 33%; width: 14px; animation-duration: 30s; animation-delay:  1s; }
-  .fp:nth-child(5)  { left: 44%; width: 24px; animation-duration: 22s; animation-delay:  9s; }
-  .fp:nth-child(6)  { left: 56%; width: 32px; animation-duration: 18s; animation-delay:  5s; }
-  .fp:nth-child(7)  { left: 67%; width: 16px; animation-duration: 28s; animation-delay: 12s; }
-  .fp:nth-child(8)  { left: 78%; width: 26px; animation-duration: 21s; animation-delay:  4s; }
-  .fp:nth-child(9)  { left: 88%; width: 20px; animation-duration: 24s; animation-delay:  8s; }
-  .fp:nth-child(10) { left: 96%; width: 30px; animation-duration: 19s; animation-delay: 15s; }
+  .fp:nth-child(1)  { left:  4%; width:28px; animation-duration:20s; animation-delay: 0s; }
+  .fp:nth-child(2)  { left: 12%; width:18px; animation-duration:26s; animation-delay: 3s; }
+  .fp:nth-child(3)  { left: 22%; width:36px; animation-duration:17s; animation-delay: 7s; }
+  .fp:nth-child(4)  { left: 33%; width:14px; animation-duration:30s; animation-delay: 1s; }
+  .fp:nth-child(5)  { left: 44%; width:24px; animation-duration:22s; animation-delay: 9s; }
+  .fp:nth-child(6)  { left: 56%; width:32px; animation-duration:18s; animation-delay: 5s; }
+  .fp:nth-child(7)  { left: 67%; width:16px; animation-duration:28s; animation-delay:12s; }
+  .fp:nth-child(8)  { left: 78%; width:26px; animation-duration:21s; animation-delay: 4s; }
+  .fp:nth-child(9)  { left: 88%; width:20px; animation-duration:24s; animation-delay: 8s; }
+  .fp:nth-child(10) { left: 96%; width:30px; animation-duration:19s; animation-delay:15s; }
 
   /* ── Header ──────────────────────────────────────────────── */
   header {
-    position   : relative; z-index: 10;
-    min-height : 240px;
+    position   : relative; z-index: 10; min-height: 240px;
     background : linear-gradient(155deg, #CDD6E0 0%, #C8D4DF 45%, #D0DAE6 100%);
-    overflow   : hidden;
-    display    : flex; align-items: stretch;
+    overflow   : hidden; display: flex; align-items: stretch;
   }
-
-  /* Photo blobs */
   .blob { position: absolute; overflow: hidden; pointer-events: none; }
-  .blob img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-  .blob-1 {
-    width: 320px; height: 380px; top: -60px; left: -70px;
-    border-radius : 38% 62% 55% 45% / 58% 42% 65% 35%;
-    opacity: 0.55; filter: saturate(0.9);
-    animation: blobFloat1 8s ease-in-out infinite;
-  }
-  .blob-2 {
-    width: 440px; height: 260px; top: -40px; right: -80px;
-    border-radius : 55% 45% 30% 70% / 42% 68% 32% 58%;
-    opacity: 0.50; filter: saturate(0.9);
-    animation: blobFloat2 10s ease-in-out infinite;
-  }
-  .blob-3 {
-    width: 220px; height: 290px; bottom: -50px; right: 180px;
-    border-radius : 45% 55% 62% 38% / 35% 62% 38% 65%;
-    opacity: 0.45; filter: saturate(0.88);
-    animation: blobFloat3 12s ease-in-out infinite;
-  }
-
-  @keyframes blobFloat1 {
-    0%,100% { transform: translate(0,0)      scale(1); }
-    50%      { transform: translate(8px,-10px) scale(1.02); }
-  }
-  @keyframes blobFloat2 {
-    0%,100% { transform: translate(0,0)       scale(1)     rotate(0deg); }
-    50%      { transform: translate(-6px,8px)  scale(1.015) rotate(0.5deg); }
-  }
-  @keyframes blobFloat3 {
-    0%,100% { transform: translate(0,0)      scale(1); }
-    50%      { transform: translate(5px,-6px) scale(1.03); }
-  }
-
-  .blob::after {
-    content    : '';
-    position   : absolute; inset: 0;
-    background : linear-gradient(135deg, rgba(200,146,42,.2), transparent 65%);
-  }
-
-  .header-vignette {
-    position   : absolute; inset: 0; z-index: 2;
-    background :
-      radial-gradient(ellipse 55% 90% at 35% 55%, rgba(110,128,144,.12), transparent),
-      linear-gradient(100deg, rgba(180,200,220,.3) 0%, rgba(200,215,230,0) 48%, rgba(160,190,215,.18) 100%);
-  }
-
-  .header-glow {
-    position   : absolute; inset: 0; z-index: 1;
-    background :
-      radial-gradient(ellipse 30% 50% at 38% 50%, rgba(200,146,42,.09), transparent),
-      radial-gradient(ellipse 20% 40% at 72% 60%, rgba(110,128,144,.07), transparent);
-  }
-
-  .header-inner {
-    position    : relative; z-index: 3;
-    display     : flex; align-items: center;
-    gap         : 2rem; width: 100%;
-    padding     : 2rem 2.5rem;
-  }
-
-  /* Klaus mascot */
-  .header-logo {
-    width      : 108px; height: 108px; flex-shrink: 0;
-    filter     : drop-shadow(0 4px 16px rgba(90,110,130,.4));
-    animation  : masterFloat 5s ease-in-out infinite;
-    cursor     : pointer;
-    transition : filter .3s;
-  }
-  .header-logo:hover {
-    filter              : drop-shadow(0 6px 22px rgba(90,110,130,.6));
-    animation-play-state: paused;
-  }
-
-  @keyframes masterFloat {
-    0%,100% { transform: translateY(0)    rotate(-1.5deg); }
-    50%      { transform: translateY(-11px) rotate(2deg); }
-  }
-
-  .header-text h1 {
-    font-size      : 2.4rem; font-weight: 900;
-    color          : var(--amber-lt);
-    letter-spacing : 5px; text-transform: uppercase;
-    line-height    : 1;
-    text-shadow    : 0 0 28px rgba(200,146,42,.35), 0 1px 0 rgba(0,0,0,.08);
-  }
-  .header-text .sub {
-    font-size      : 0.85rem; color: var(--cream-muted);
-    letter-spacing : 4px; margin-top: 7px;
-    text-transform : uppercase;
-    text-shadow    : 0 0 20px rgba(200,146,42,.3);
-  }
-
-  .header-date       { margin-left: auto; text-align: right; }
-  .hd-num  {
-    font-size   : 3.2rem; font-weight: 900; color: var(--amber);
-    line-height : 1; text-shadow: 0 0 25px rgba(200,146,42,.5);
-  }
-  .hd-info {
-    font-size      : 0.68rem; letter-spacing: 2px;
-    color          : var(--cream-muted); text-transform: uppercase;
-    margin-top     : 2px;
-  }
+  .blob img { width:100%; height:100%; object-fit:cover; display:block; }
+  .blob-1 { width:320px; height:380px; top:-60px; left:-70px;
+    border-radius:38% 62% 55% 45%/58% 42% 65% 35%; opacity:.55; filter:saturate(.9);
+    animation:blobFloat1 8s ease-in-out infinite; }
+  .blob-2 { width:440px; height:260px; top:-40px; right:-80px;
+    border-radius:55% 45% 30% 70%/42% 68% 32% 58%; opacity:.50; filter:saturate(.9);
+    animation:blobFloat2 10s ease-in-out infinite; }
+  .blob-3 { width:220px; height:290px; bottom:-50px; right:180px;
+    border-radius:45% 55% 62% 38%/35% 62% 38% 65%; opacity:.45; filter:saturate(.88);
+    animation:blobFloat3 12s ease-in-out infinite; }
+  @keyframes blobFloat1 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(8px,-10px) scale(1.02)} }
+  @keyframes blobFloat2 { 0%,100%{transform:translate(0,0) scale(1) rotate(0deg)} 50%{transform:translate(-6px,8px) scale(1.015) rotate(.5deg)} }
+  @keyframes blobFloat3 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(5px,-6px) scale(1.03)} }
+  .blob::after { content:''; position:absolute; inset:0; background:linear-gradient(135deg,rgba(200,146,42,.2),transparent 65%); }
+  .header-vignette { position:absolute; inset:0; z-index:2;
+    background: radial-gradient(ellipse 55% 90% at 35% 55%,rgba(110,128,144,.12),transparent),
+                linear-gradient(100deg,rgba(180,200,220,.3) 0%,rgba(200,215,230,0) 48%,rgba(160,190,215,.18) 100%); }
+  .header-glow { position:absolute; inset:0; z-index:1;
+    background: radial-gradient(ellipse 30% 50% at 38% 50%,rgba(200,146,42,.09),transparent),
+                radial-gradient(ellipse 20% 40% at 72% 60%,rgba(110,128,144,.07),transparent); }
+  .header-inner { position:relative; z-index:3; display:flex; align-items:center; gap:2rem; width:100%; padding:2rem 2.5rem; }
+  .header-logo { width:108px; height:108px; flex-shrink:0;
+    filter:drop-shadow(0 4px 16px rgba(90,110,130,.4));
+    animation:masterFloat 5s ease-in-out infinite; cursor:pointer; transition:filter .3s; }
+  .header-logo:hover { filter:drop-shadow(0 6px 22px rgba(90,110,130,.6)); animation-play-state:paused; }
+  @keyframes masterFloat { 0%,100%{transform:translateY(0) rotate(-1.5deg)} 50%{transform:translateY(-11px) rotate(2deg)} }
+  .header-text h1 { font-size:2.4rem; font-weight:900; color:var(--amber-lt); letter-spacing:5px; text-transform:uppercase; line-height:1; text-shadow:0 0 28px rgba(200,146,42,.35),0 1px 0 rgba(0,0,0,.08); }
+  .header-text .sub { font-size:.85rem; color:var(--cream-muted); letter-spacing:4px; margin-top:7px; text-transform:uppercase; }
+  .header-date { margin-left:auto; text-align:right; }
+  .hd-num  { font-size:3.2rem; font-weight:900; color:var(--amber); line-height:1; text-shadow:0 0 25px rgba(200,146,42,.5); }
+  .hd-info { font-size:.68rem; letter-spacing:2px; color:var(--cream-muted); text-transform:uppercase; margin-top:2px; }
 
   /* ── Layout ──────────────────────────────────────────────── */
   main {
-    position              : relative; z-index: 1;
-    max-width             : 1200px; margin: 2rem auto;
-    padding               : 0 1.5rem 6rem;
-    display               : grid;
-    grid-template-columns : 380px 1fr;
-    gap                   : 1.5rem;
-    align-items           : start;
+    position:relative; z-index:1; max-width:1200px; margin:2rem auto;
+    padding:0 1.5rem 6rem;
+    display:grid; grid-template-columns:380px 1fr; gap:1.5rem; align-items:start;
   }
 
   /* ── Card ────────────────────────────────────────────────── */
-  .card {
-    background      : var(--card);
-    border-radius   : 24px; padding: 1.6rem;
-    border          : 1px solid var(--border);
-    backdrop-filter : blur(12px);
-    transition      : border-color .3s, box-shadow .3s;
-  }
-  .card:hover { border-color: var(--border-h); box-shadow: var(--glow); }
-  .card + .card { margin-top: 1.5rem; }
-
-  .card-title {
-    font-size      : 0.6rem; font-weight: 800;
-    letter-spacing : 3px; text-transform: uppercase;
-    color          : var(--amber); margin-bottom: 1.3rem;
-    display        : flex; align-items: center; gap: 8px;
-  }
-
-  .paw-icon { width: 16px; height: 16px; fill: var(--amber); flex-shrink: 0; }
+  .card { background:var(--card); border-radius:24px; padding:1.6rem; border:1px solid var(--border); backdrop-filter:blur(12px); transition:border-color .3s,box-shadow .3s; }
+  .card:hover { border-color:var(--border-h); box-shadow:var(--glow); }
+  .card + .card { margin-top:1.5rem; }
+  .card-title { font-size:.6rem; font-weight:800; letter-spacing:3px; text-transform:uppercase; color:var(--amber); margin-bottom:1.3rem; display:flex; align-items:center; gap:8px; }
+  .paw-icon { width:16px; height:16px; fill:var(--amber); flex-shrink:0; }
 
   /* ── Calendar ────────────────────────────────────────────── */
-  .cal-header {
-    display         : flex; align-items: center;
-    justify-content : space-between; margin-bottom: 1rem;
-  }
-  .cal-month { font-size: 1.05rem; font-weight: 800; color: var(--amber-lt); }
-
-  .cal-nav {
-    width         : 32px; height: 32px;
-    background    : rgba(200,146,42,.1); border: 1px solid var(--border);
-    border-radius : 50%; cursor: pointer; color: var(--amber);
-    font-size     : 1.2rem;
-    display       : flex; align-items: center; justify-content: center;
-    transition    : all .22s;
-  }
-  .cal-nav:hover {
-    background    : var(--amber); color: var(--bg);
-    border-color  : var(--amber); transform: scale(1.1);
-  }
-
-  .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
-
-  .cal-dname {
-    text-align     : center; font-size: 0.55rem; font-weight: 800;
-    letter-spacing : 1px; color: var(--cream-muted);
-    padding        : 4px 0 8px; text-transform: uppercase;
-  }
-
-  .cal-day {
-    aspect-ratio  : 1;
-    display       : flex; align-items: center; justify-content: center;
-    border-radius : 10px; font-size: .8rem; font-weight: 500;
-    cursor        : pointer; position: relative;
-    transition    : all .18s; color: var(--cream); user-select: none;
-  }
-  .cal-day:not(.other):hover { background: rgba(200,146,42,.18); transform: scale(1.12); }
-  .cal-day.today  { background: var(--amber); color: var(--bg); font-weight: 800; box-shadow: 0 0 14px rgba(200,146,42,.5); }
-  .cal-day.sel    { background: rgba(200,146,42,.22); color: var(--amber-lt); font-weight: 800; border: 1px solid var(--amber); }
-  .cal-day.today.sel { background: var(--amber-dim); }
-  .cal-day.has-t::after  { content: ''; position: absolute; bottom: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
-  .cal-day.today.has-t::after { background: var(--bg); }
-  .cal-day.other  { color: rgba(140,100,50,.28); cursor: default; }
-
-  .sel-info {
-    margin-top    : .9rem; padding: .68rem 1rem;
-    background    : rgba(200,146,42,.07); border-radius: 12px;
-    border-left   : 3px solid var(--amber);
-    font-size     : .78rem; color: var(--cream-muted); min-height: 38px;
-  }
-
-  .quick-add { display: flex; gap: .5rem; margin-top: .6rem; }
-  .quick-add input {
-    flex          : 1; padding: .5rem .8rem;
-    background    : rgba(200,146,42,.07); border: 1px solid var(--border);
-    border-radius : 10px; font-size: .82rem; color: var(--cream);
-    font-family   : inherit; outline: none; transition: border-color .2s;
-  }
-  .quick-add input::placeholder { color: var(--cream-muted); }
-  .quick-add input:focus { border-color: var(--amber); }
-  .quick-add button {
-    padding       : .5rem 1rem; background: var(--amber); color: var(--bg);
-    border        : none; border-radius: 10px; font-weight: 800; font-size: 1rem;
-    cursor        : pointer; transition: all .2s;
-  }
-  .quick-add button:hover { background: var(--amber-lt); transform: scale(1.08); }
+  .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; }
+  .cal-month  { font-size:1.05rem; font-weight:800; color:var(--amber-lt); }
+  .cal-nav { width:32px; height:32px; background:rgba(200,146,42,.1); border:1px solid var(--border); border-radius:50%; cursor:pointer; color:var(--amber); font-size:1.2rem; display:flex; align-items:center; justify-content:center; transition:all .22s; }
+  .cal-nav:hover { background:var(--amber); color:var(--bg); border-color:var(--amber); transform:scale(1.1); }
+  .cal-grid  { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+  .cal-dname { text-align:center; font-size:.55rem; font-weight:800; letter-spacing:1px; color:var(--cream-muted); padding:4px 0 8px; text-transform:uppercase; }
+  .cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:10px; font-size:.8rem; font-weight:500; cursor:pointer; position:relative; transition:all .18s; color:var(--cream); user-select:none; }
+  .cal-day:not(.other):hover { background:rgba(200,146,42,.18); transform:scale(1.12); }
+  .cal-day.today { background:var(--amber); color:var(--bg); font-weight:800; box-shadow:0 0 14px rgba(200,146,42,.5); }
+  .cal-day.sel   { background:rgba(200,146,42,.22); color:var(--amber-lt); font-weight:800; border:1px solid var(--amber); }
+  .cal-day.today.sel { background:var(--amber-dim); }
+  .cal-day.has-t::after { content:''; position:absolute; bottom:2px; width:5px; height:5px; border-radius:50%; background:var(--amber); }
+  .cal-day.today.has-t::after { background:var(--bg); }
+  .cal-day.other { color:rgba(140,100,50,.28); cursor:default; }
+  .sel-info { margin-top:.9rem; padding:.68rem 1rem; background:rgba(200,146,42,.07); border-radius:12px; border-left:3px solid var(--amber); font-size:.78rem; color:var(--cream-muted); min-height:38px; }
+  .quick-add { display:flex; gap:.5rem; margin-top:.6rem; }
+  .quick-add input { flex:1; padding:.5rem .8rem; background:rgba(200,146,42,.07); border:1px solid var(--border); border-radius:10px; font-size:.82rem; color:var(--cream); font-family:inherit; outline:none; transition:border-color .2s; }
+  .quick-add input::placeholder { color:var(--cream-muted); }
+  .quick-add input:focus { border-color:var(--amber); }
+  .quick-add button { padding:.5rem 1rem; background:var(--amber); color:var(--bg); border:none; border-radius:10px; font-weight:800; font-size:1rem; cursor:pointer; transition:all .2s; }
+  .quick-add button:hover { background:var(--amber-lt); transform:scale(1.08); }
 
   /* ── Stats ───────────────────────────────────────────────── */
-  .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: .75rem; }
-
-  .stat {
-    background    : rgba(200,146,42,.06); border: 1px solid var(--border);
-    border-radius : 18px; padding: 1.1rem .5rem; text-align: center;
-    transition    : all .25s; cursor: default; position: relative; overflow: hidden;
-  }
-  .stat::before {
-    content    : ''; position: absolute; inset: 0;
-    background : radial-gradient(ellipse 80% 60% at 50% 0%, rgba(200,146,42,.08), transparent);
-  }
-  .stat:hover { background: rgba(200,146,42,.14); transform: translateY(-4px); box-shadow: var(--glow); }
-
-  .stat-num   { font-size: 2.2rem; font-weight: 900; color: var(--amber); line-height: 1; text-shadow: 0 0 18px rgba(200,146,42,.5); }
-  .stat-label { font-size: 0.56rem; text-transform: uppercase; letter-spacing: 2px; color: var(--cream-muted); margin-top: 5px; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:.75rem; }
+  .stat { background:rgba(200,146,42,.06); border:1px solid var(--border); border-radius:18px; padding:1.1rem .5rem; text-align:center; transition:all .25s; position:relative; overflow:hidden; }
+  .stat::before { content:''; position:absolute; inset:0; background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(200,146,42,.08),transparent); }
+  .stat:hover { background:rgba(200,146,42,.14); transform:translateY(-4px); box-shadow:var(--glow); }
+  .stat-num   { font-size:2.2rem; font-weight:900; color:var(--amber); line-height:1; text-shadow:0 0 18px rgba(200,146,42,.5); }
+  .stat-label { font-size:.56rem; text-transform:uppercase; letter-spacing:2px; color:var(--cream-muted); margin-top:5px; }
 
   /* ── Photos ──────────────────────────────────────────────── */
-  .photo-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+  .photo-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .photo-item { aspect-ratio:1; border-radius:16px; overflow:hidden; position:relative; border:1px solid var(--border); transition:transform .35s cubic-bezier(.34,1.56,.64,1),box-shadow .3s; }
+  .photo-item:hover { transform:scale(1.06) rotate(1.5deg); box-shadow:0 10px 30px rgba(200,146,42,.35),var(--glow); border-color:var(--amber); z-index:2; }
+  .photo-item img { width:100%; height:100%; object-fit:cover; display:block; }
+  .del-ph { position:absolute; top:5px; right:5px; width:24px; height:24px; background:rgba(10,6,2,.72); color:white; border:none; border-radius:50%; font-size:14px; cursor:pointer; display:none; align-items:center; justify-content:center; transition:background .2s; line-height:1; }
+  .photo-item:hover .del-ph { display:flex; }
+  .del-ph:hover { background:var(--red); }
+  .photo-add { aspect-ratio:1; border-radius:16px; border:2px dashed rgba(200,146,42,.25); display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; color:rgba(200,146,42,.4); gap:4px; transition:all .22s; }
+  .photo-add:hover { border-color:var(--amber); color:var(--amber); background:rgba(200,146,42,.07); transform:scale(1.03); }
+  .pa-icon { font-size:1.6rem; }
+  .pa-txt  { font-size:.57rem; letter-spacing:1.5px; text-transform:uppercase; font-weight:700; }
+  .photos-full { font-size:.72rem; color:var(--cream-muted); text-align:center; margin-top:.5rem; }
 
-  .photo-item {
-    aspect-ratio  : 1; border-radius: 16px; overflow: hidden;
-    position      : relative; border: 1px solid var(--border);
-    transition    : transform .35s cubic-bezier(.34,1.56,.64,1), box-shadow .3s;
-  }
-  .photo-item:hover {
-    transform    : scale(1.06) rotate(1.5deg);
-    box-shadow   : 0 10px 30px rgba(200,146,42,.35), var(--glow);
-    border-color : var(--amber); z-index: 2;
-  }
-  .photo-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-  .del-ph {
-    position      : absolute; top: 5px; right: 5px;
-    width         : 24px; height: 24px;
-    background    : rgba(10,6,2,.72); color: white;
-    border        : none; border-radius: 50%; font-size: 14px;
-    cursor        : pointer; display: none;
-    align-items   : center; justify-content: center;
-    transition    : background .2s; line-height: 1;
-  }
-  .photo-item:hover .del-ph { display: flex; }
-  .del-ph:hover { background: var(--red); }
-
-  .photo-add {
-    aspect-ratio  : 1; border-radius: 16px;
-    border        : 2px dashed rgba(200,146,42,.25);
-    display       : flex; flex-direction: column;
-    align-items   : center; justify-content: center;
-    cursor        : pointer; color: rgba(200,146,42,.4);
-    gap           : 4px; transition: all .22s;
-  }
-  .photo-add:hover {
-    border-color : var(--amber); color: var(--amber);
-    background   : rgba(200,146,42,.07); transform: scale(1.03);
-  }
-
-  .pa-icon { font-size: 1.6rem; }
-  .pa-txt  { font-size: 0.57rem; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; }
-  .photos-full { font-size: .72rem; color: var(--cream-muted); text-align: center; margin-top: .5rem; }
-
-  /* ── Todo: add form ──────────────────────────────────────── */
-  .todo-add { display: flex; gap: .65rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  /* ══ TODO: ADD FORM ═══════════════════════════════════════ */
+  .todo-add { display:flex; flex-direction:column; gap:.75rem; margin-bottom:1.2rem; }
 
   .todo-input {
-    flex          : 1; min-width: 180px;
-    padding       : .92rem 1.15rem;
-    background    : rgba(200,146,42,.05); border: 1.5px solid var(--border);
-    border-radius : 18px; font-size: .92rem; color: var(--cream);
-    font-family   : inherit; outline: none; transition: all .22s;
+    width:100%; padding:.92rem 1.15rem;
+    background:rgba(200,146,42,.05); border:1.5px solid var(--border);
+    border-radius:18px; font-size:.92rem; color:var(--cream);
+    font-family:inherit; outline:none; transition:all .22s;
   }
-  .todo-input:focus {
-    border-color : var(--amber); background: rgba(200,146,42,.1);
-    box-shadow   : 0 0 0 4px rgba(200,146,42,.1);
-  }
-  .todo-input::placeholder { color: var(--cream-muted); }
-  .todo-input.shake { animation: shake .35s; border-color: var(--red); }
+  .todo-input:focus { border-color:var(--amber); background:rgba(200,146,42,.1); box-shadow:0 0 0 4px rgba(200,146,42,.1); }
+  .todo-input::placeholder { color:var(--cream-muted); }
+  .todo-input.shake { animation:shake .35s; border-color:var(--red); }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
 
-  @keyframes shake {
-    0%,100% { transform: translateX(0); }
-    25%      { transform: translateX(-6px); }
-    75%      { transform: translateX(6px); }
+  /* Tag selector */
+  .tag-selector { display:flex; gap:5px; flex-wrap:wrap; }
+  .tag-toggle {
+    padding:4px 11px; border-radius:20px; font-size:.7rem; font-weight:700;
+    cursor:pointer; background:transparent; color:var(--cream-muted);
+    font-family:inherit; transition:all .18s; border:1.5px solid var(--border);
   }
+  .tag-toggle:hover { border-color:currentColor; opacity:.85; }
+  /* Active states per tag */
+  .tag-toggle[data-tag="treball"].active  { background:rgba(74,126,192,.18);  border-color:#4A7EC0; color:#4A7EC0; }
+  .tag-toggle[data-tag="personal"].active { background:rgba(144,96,192,.18);  border-color:#9060C0; color:#9060C0; }
+  .tag-toggle[data-tag="casa"].active     { background:rgba(80,160,96,.18);   border-color:#50A060; color:#50A060; }
+  .tag-toggle[data-tag="compres"].active  { background:rgba(192,120,48,.18);  border-color:#C07830; color:#C07830; }
+  .tag-toggle[data-tag="salut"].active    { background:rgba(192,64,96,.18);   border-color:#C04060; color:#C04060; }
+  .tag-toggle[data-tag="klaus"].active    { background:rgba(200,146,42,.18);  border-color:var(--amber); color:var(--amber-lt); }
 
-  .add-opts { display: flex; gap: .5rem; flex-wrap: wrap; }
+  /* Options row (date, time, priority, color, btn) */
+  .add-opts-row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
 
   .opt {
-    padding       : .55rem .8rem;
-    background    : rgba(200,146,42,.05); border: 1.5px solid var(--border);
-    border-radius : 12px; color: var(--cream);
-    font-size     : .8rem; font-family: inherit; cursor: pointer; outline: none;
-    transition    : border-color .2s;
+    padding:.52rem .8rem; background:rgba(200,146,42,.05); border:1.5px solid var(--border);
+    border-radius:12px; color:var(--cream); font-size:.8rem; font-family:inherit;
+    cursor:pointer; outline:none; transition:border-color .2s;
   }
-  .opt:focus { border-color: var(--amber); }
-  option { background: #F2F5F8; color: var(--cream); }
+  .opt:focus { border-color:var(--amber); }
+  option { background:#F2F5F8; color:var(--cream); }
+
+  /* Color picker */
+  .color-picker { display:flex; gap:5px; align-items:center; padding:0 4px; flex-shrink:0; }
+  .color-dot {
+    width:18px; height:18px; border-radius:50%;
+    cursor:pointer; border:2px solid transparent;
+    transition:transform .15s, border-color .15s, box-shadow .15s; flex-shrink:0;
+  }
+  .color-dot:hover  { transform:scale(1.25); }
+  .color-dot.sel    { border-color:var(--cream); box-shadow:0 0 0 1px rgba(0,0,0,.15); transform:scale(1.15); }
+  .color-dot.none   { background:transparent !important; border:2px dashed rgba(200,146,42,.4); }
+  .color-dot.none.sel { border-color:var(--amber); }
 
   .add-btn {
-    padding       : .88rem 1.8rem;
-    background    : linear-gradient(135deg, var(--amber) 0%, var(--amber-dim) 100%);
-    color         : var(--bg); border: none; border-radius: 18px;
-    font-size     : .9rem; font-weight: 800; letter-spacing: 1px;
-    cursor        : pointer; transition: all .25s; white-space: nowrap;
-    box-shadow    : 0 4px 18px rgba(200,146,42,.35);
+    margin-left:auto; padding:.88rem 1.8rem;
+    background:linear-gradient(135deg,var(--amber) 0%,var(--amber-dim) 100%);
+    color:var(--bg); border:none; border-radius:18px;
+    font-size:.9rem; font-weight:800; letter-spacing:1px;
+    cursor:pointer; transition:all .25s; white-space:nowrap;
+    box-shadow:0 4px 18px rgba(200,146,42,.35);
   }
-  .add-btn:hover {
-    transform  : translateY(-3px);
-    box-shadow : 0 10px 30px rgba(200,146,42,.55);
-    background : linear-gradient(135deg, var(--amber-lt) 0%, var(--amber) 100%);
+  .add-btn:hover { transform:translateY(-3px); box-shadow:0 10px 30px rgba(200,146,42,.55); background:linear-gradient(135deg,var(--amber-lt) 0%,var(--amber) 100%); }
+  .add-btn:active { transform:translateY(0); }
+
+  /* ══ TODO: FILTERS ════════════════════════════════════════ */
+  .filters { display:flex; gap:.45rem; margin-bottom:.65rem; flex-wrap:wrap; align-items:center; }
+  .filter-btn { padding:.4rem 1rem; background:transparent; border:1.5px solid rgba(200,146,42,.18); border-radius:20px; color:var(--cream-muted); font-size:.73rem; font-weight:700; cursor:pointer; font-family:inherit; transition:all .18s; }
+  .filter-btn:hover  { border-color:var(--amber); color:var(--amber-lt); }
+  .filter-btn.active { background:var(--amber); border-color:var(--amber); color:var(--bg); box-shadow:0 3px 14px rgba(200,146,42,.38); }
+  .clear-btn { margin-left:auto; padding:.4rem .95rem; background:transparent; border:1.5px solid rgba(200,80,64,.2); border-radius:20px; color:rgba(200,80,64,.55); font-size:.7rem; font-weight:600; cursor:pointer; font-family:inherit; transition:all .18s; }
+  .clear-btn:hover { border-color:var(--red); color:var(--red); }
+
+  /* Tag filter row */
+  .tag-filter-row { display:flex; gap:5px; margin-bottom:1.1rem; flex-wrap:wrap; }
+  .tag-filter-btn {
+    padding:3px 10px; border-radius:20px; font-size:.68rem; font-weight:700;
+    cursor:pointer; background:transparent; font-family:inherit; transition:all .18s;
+    border:1.5px solid;
   }
-  .add-btn:active { transform: translateY(0); }
+  .tag-filter-btn.active { opacity:1 !important; }
+  .tag-filter-btn:not(.active) { opacity:.5; }
+  .tag-filter-btn:hover { opacity:1; transform:scale(1.05); }
 
-  /* ── Todo: filters ───────────────────────────────────────── */
-  .filters { display: flex; gap: .45rem; margin-bottom: 1.3rem; flex-wrap: wrap; align-items: center; }
-
-  .filter-btn {
-    padding       : .4rem 1rem;
-    background    : transparent; border: 1.5px solid rgba(200,146,42,.18);
-    border-radius : 20px; color: var(--cream-muted);
-    font-size     : .73rem; font-weight: 700; letter-spacing: .5px;
-    cursor        : pointer; font-family: inherit; transition: all .18s;
-  }
-  .filter-btn:hover  { border-color: var(--amber); color: var(--amber-lt); }
-  .filter-btn.active { background: var(--amber); border-color: var(--amber); color: var(--bg); box-shadow: 0 3px 14px rgba(200,146,42,.38); }
-
-  .clear-btn {
-    margin-left   : auto; padding: .4rem .95rem;
-    background    : transparent; border: 1.5px solid rgba(200,80,64,.2);
-    border-radius : 20px; color: rgba(200,80,64,.55);
-    font-size     : .7rem; font-weight: 600; cursor: pointer;
-    font-family   : inherit; transition: all .18s;
-  }
-  .clear-btn:hover { border-color: var(--red); color: var(--red); }
-
-  /* ── Todo: list items ────────────────────────────────────── */
-  .todo-list { display: flex; flex-direction: column; gap: .55rem; min-height: 140px; }
+  /* ══ TODO: ITEMS ══════════════════════════════════════════ */
+  .todo-list { display:flex; flex-direction:column; gap:.55rem; min-height:140px; }
 
   .todo-item {
-    display       : flex; align-items: center; gap: .75rem;
-    padding       : .88rem 1rem;
-    background    : rgba(200,146,42,.04); border-radius: 18px;
-    border        : 1px solid var(--border); border-left: 4px solid var(--amber);
-    transition    : all .25s;
-    animation     : slideIn .3s cubic-bezier(.34,1.56,.64,1);
+    display:flex; align-items:flex-start; gap:.75rem;
+    padding:.88rem 1rem;
+    background:rgba(200,146,42,.04); border-radius:18px;
+    border:1px solid var(--border); border-left:4px solid var(--amber);
+    transition:all .25s;
+    animation:slideIn .3s cubic-bezier(.34,1.56,.64,1);
   }
-
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateX(-20px) scale(.96); }
-    to   { opacity: 1; transform: translateX(0)      scale(1); }
-  }
-
-  .todo-item:hover {
-    background   : rgba(200,146,42,.09); border-color: var(--border-h);
-    transform    : translateX(4px);
-    box-shadow   : 0 4px 18px rgba(200,146,42,.12);
-  }
-  .todo-item.completed                  { opacity: .42; }
-  .todo-item.completed .todo-text       { text-decoration: line-through; color: var(--cream-muted); }
-  .todo-item.p-high                     { border-left-color: var(--red); }
-  .todo-item.p-normal                   { border-left-color: var(--amber); }
-  .todo-item.p-low                      { border-left-color: var(--green); }
-  .todo-item.removing                   { opacity: 0; transform: translateX(22px) scale(.95); pointer-events: none; transition: .28s; }
+  @keyframes slideIn { from{opacity:0;transform:translateX(-20px) scale(.96)} to{opacity:1;transform:translateX(0) scale(1)} }
+  .todo-item:hover { background:rgba(200,146,42,.09); border-color:var(--border-h); transform:translateX(4px); box-shadow:0 4px 18px rgba(200,146,42,.12); }
+  .todo-item.completed { opacity:.42; }
+  .todo-item.completed .todo-text { text-decoration:line-through; color:var(--cream-muted); }
+  .todo-item.p-high   { border-left-color:var(--red); }
+  .todo-item.p-normal { border-left-color:var(--amber); }
+  .todo-item.p-low    { border-left-color:var(--green); }
+  .todo-item.removing { opacity:0; transform:translateX(22px) scale(.95); pointer-events:none; transition:.28s; }
 
   /* Paw checkbox */
-  .chk {
-    width      : 26px; height: 26px; flex-shrink: 0;
-    cursor     : pointer; position: relative; transition: transform .22s;
+  .chk { width:26px; height:26px; flex-shrink:0; margin-top:2px; cursor:pointer; transition:transform .22s; }
+  .chk:hover { transform:scale(1.2) rotate(-5deg); }
+  .chk svg   { width:100%; height:100%; overflow:visible; }
+  .chk .paw-empty { fill:none; stroke:rgba(200,146,42,.45); stroke-width:6; transition:.2s; }
+  .chk:hover .paw-empty { stroke:var(--amber); }
+  .chk .paw-full  { fill:var(--amber); display:none; }
+  .chk.on .paw-empty { display:none; }
+  .chk.on .paw-full  { display:block; }
+  .chk.on { animation:pawPop .3s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes pawPop { 0%{transform:scale(.7) rotate(-10deg)} 100%{transform:scale(1) rotate(0)} }
+
+  /* Todo body */
+  .todo-body { flex:1; min-width:0; }
+  .todo-top  { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; min-width:0; }
+  .todo-text { flex:1; min-width:100px; font-size:.88rem; color:var(--cream); line-height:1.45; word-break:break-word; }
+
+  /* Meta + actions */
+  .todo-meta    { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
+  .todo-actions { display:flex; gap:2px; align-items:center; flex-shrink:0; margin-left:auto; }
+
+  /* Badges */
+  .todo-badge  { font-size:.62rem; padding:2px 9px; border-radius:20px; font-weight:700; white-space:nowrap; }
+  .badge-date  { background:rgba(200,146,42,.14); color:var(--amber-lt); }
+  .badge-high  { background:rgba(200,80,64,.14);  color:var(--red); }
+  .badge-time  { background:rgba(110,128,144,.13); color:var(--cream-muted); }
+
+  /* Tag pills on items */
+  .tag-pill { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:12px; font-size:.62rem; font-weight:700; white-space:nowrap; }
+  .tag-treball { background:rgba(74,126,192,.14);  color:#3A6EB0; }
+  .tag-personal { background:rgba(144,96,192,.14); color:#7050A0; }
+  .tag-casa     { background:rgba(80,160,96,.14);  color:#307050; }
+  .tag-compres  { background:rgba(192,120,48,.14); color:#A05818; }
+  .tag-salut    { background:rgba(192,64,96,.14);  color:#B03050; }
+  .tag-klaus    { background:rgba(200,146,42,.14); color:var(--amber-lt); }
+
+  /* Expand + delete buttons */
+  .expand-btn {
+    width:24px; height:24px; border:none; background:none;
+    cursor:pointer; border-radius:6px; color:rgba(200,146,42,.35);
+    font-size:.85rem; display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; transition:all .18s; line-height:1;
   }
-  .chk:hover { transform: scale(1.2) rotate(-5deg); }
-  .chk svg   { width: 100%; height: 100%; overflow: visible; }
+  .expand-btn:hover { background:rgba(200,146,42,.12); color:var(--amber); }
+  .expand-btn.open  { color:var(--amber); transform:rotate(180deg); }
 
-  .chk .paw-empty { fill: none; stroke: rgba(200,146,42,.45); stroke-width: 6; transition: .2s; }
-  .chk:hover .paw-empty  { stroke: var(--amber); }
-  .chk .paw-full         { fill: var(--amber); display: none; }
-  .chk.on .paw-empty     { display: none; }
-  .chk.on .paw-full      { display: block; }
-  .chk.on                { animation: pawPop .3s cubic-bezier(.34,1.56,.64,1); }
+  .del-btn { width:28px; height:28px; border:none; background:none; cursor:pointer; border-radius:8px; color:rgba(200,146,42,.2); font-size:1.2rem; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .18s; line-height:1; }
+  .del-btn:hover { background:rgba(200,80,64,.14); color:var(--red); }
 
-  @keyframes pawPop {
-    0%   { transform: scale(.7) rotate(-10deg); }
-    100% { transform: scale(1)  rotate(0deg); }
+  /* Notes (expandable) */
+  .todo-detail { display:none; padding:.6rem 0 .1rem; animation:fadeDetail .2s ease; }
+  .todo-detail.open { display:block; }
+  @keyframes fadeDetail { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} }
+  .note-area {
+    width:100%; min-height:56px; max-height:160px;
+    padding:.6rem .85rem;
+    background:rgba(200,146,42,.04); border:1px solid var(--border);
+    border-radius:12px; font-size:.82rem; color:var(--cream);
+    font-family:inherit; resize:vertical; outline:none; transition:border-color .2s;
   }
-
-  .todo-text   { flex: 1; font-size: .88rem; color: var(--cream); line-height: 1.45; word-break: break-word; }
-
-  .todo-badge  { font-size: .65rem; padding: 2px 9px; border-radius: 20px; font-weight: 700; flex-shrink: 0; }
-  .badge-date  { background: rgba(200,146,42,.14); color: var(--amber-lt); }
-  .badge-high  { background: rgba(200,80,64,.14);  color: var(--red); }
-
-  .del-btn {
-    width         : 28px; height: 28px; border: none; background: none;
-    cursor        : pointer; border-radius: 8px; color: rgba(200,146,42,.2);
-    font-size     : 1.2rem;
-    display       : flex; align-items: center; justify-content: center;
-    flex-shrink   : 0; transition: all .18s; line-height: 1;
-  }
-  .del-btn:hover { background: rgba(200,80,64,.14); color: var(--red); }
+  .note-area:focus { border-color:var(--amber); background:rgba(200,146,42,.07); }
+  .note-area::placeholder { color:var(--cream-muted); }
 
   /* ── Empty state ─────────────────────────────────────────── */
-  .empty-state {
-    display         : flex; flex-direction: column;
-    align-items     : center; justify-content: center;
-    padding         : 3rem 1rem; gap: .75rem;
-  }
-  .empty-state p { font-size: .85rem; color: var(--cream-muted); }
+  .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:3rem 1rem; gap:.75rem; }
+  .empty-state p { font-size:.85rem; color:var(--cream-muted); }
 
   /* ── Toast ───────────────────────────────────────────────── */
-  .toast {
-    position      : fixed; bottom: 2rem; left: 50%;
-    transform     : translateX(-50%) translateY(90px);
-    background    : var(--amber); color: var(--bg);
-    padding       : .75rem 1.9rem; border-radius: 30px;
-    font-size     : .82rem; font-weight: 800; letter-spacing: .5px;
-    box-shadow    : 0 8px 32px rgba(200,146,42,.5);
-    transition    : transform .38s cubic-bezier(.34,1.56,.64,1);
-    z-index       : 1000; pointer-events: none;
-  }
-  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast { position:fixed; bottom:2rem; left:50%; transform:translateX(-50%) translateY(90px); background:var(--amber); color:var(--bg); padding:.75rem 1.9rem; border-radius:30px; font-size:.82rem; font-weight:800; letter-spacing:.5px; box-shadow:0 8px 32px rgba(200,146,42,.5); transition:transform .38s cubic-bezier(.34,1.56,.64,1); z-index:1000; pointer-events:none; }
+  .toast.show { transform:translateX(-50%) translateY(0); }
 
   /* ── Peeking eyes ────────────────────────────────────────── */
-  .eyes-peek {
-    position  : fixed; bottom: 0; right: 28px; width: 88px;
-    filter    : drop-shadow(0 -4px 14px rgba(200,146,42,.4));
-    animation : bobble 5s ease-in-out infinite;
-    z-index   : 50; opacity: .88; cursor: default; transition: opacity .3s;
-  }
-  .eyes-peek:hover { opacity: 1; transform: translateY(-10px) !important; }
-
-  @keyframes bobble {
-    0%,100% { transform: translateY(0); }
-    50%      { transform: translateY(-8px); }
-  }
+  .eyes-peek { position:fixed; bottom:0; right:28px; width:88px; filter:drop-shadow(0 -4px 14px rgba(200,146,42,.4)); animation:bobble 5s ease-in-out infinite; z-index:50; opacity:.88; }
+  .eyes-peek:hover { opacity:1; }
+  @keyframes bobble { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
 
   /* ── Responsive ──────────────────────────────────────────── */
-  @media (max-width: 800px) {
-    main                  { grid-template-columns: 1fr; }
-    header                { min-height: 160px; }
-    .header-text h1       { font-size: 1.6rem; letter-spacing: 3px; }
-    .blob-2, .blob-3      { display: none; }
+  @media (max-width:800px) {
+    main { grid-template-columns:1fr; }
+    header { min-height:160px; }
+    .header-text h1 { font-size:1.6rem; letter-spacing:3px; }
+    .blob-2,.blob-3 { display:none; }
   }
-
-  /* ── Scrollbar ───────────────────────────────────────────── */
-  ::-webkit-scrollbar       { width: 4px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: rgba(200,146,42,.35); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--amber); }
-
-  input[type="date"]::-webkit-calendar-picker-indicator {
-    filter: sepia(1) saturate(2) hue-rotate(8deg) brightness(0.7);
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:rgba(200,146,42,.35); border-radius:2px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--amber); }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    filter:sepia(1) saturate(2) hue-rotate(8deg) brightness(.7);
   }
 
   /* ══ CURSOR PET ═══════════════════════════════════════════ */
-  #wdog {
-    position         : fixed;
-    width            : 56px; z-index: 999;
-    pointer-events   : none; will-change: left, top;
-    filter           : drop-shadow(0 3px 8px rgba(0,0,0,.55));
-    image-rendering  : pixelated;
-  }
-  #wdog svg { overflow: visible; width: 100%; display: block; }
-
-  /* Breathing idle */
-  .dbody { transform-box: fill-box; transform-origin: 50% 50%; }
-  #wdog.idle .dbody { animation: breathe 2.2s ease-in-out infinite; }
-  @keyframes breathe { 0%,100%{transform:scaleY(1) scaleX(1)} 50%{transform:scaleY(1.07) scaleX(0.97)} }
-
-  /* Tail */
-  .dtail { transform-box: fill-box; transform-origin: 100% 100%; animation: twag .9s ease-in-out infinite; }
+  #wdog { position:fixed; width:56px; z-index:999; pointer-events:none; will-change:left,top; filter:drop-shadow(0 3px 8px rgba(0,0,0,.55)); image-rendering:pixelated; }
+  #wdog svg { overflow:visible; width:100%; display:block; }
+  .dbody { transform-box:fill-box; transform-origin:50% 50%; }
+  #wdog.idle .dbody { animation:breathe 2.2s ease-in-out infinite; }
+  @keyframes breathe { 0%,100%{transform:scaleY(1) scaleX(1)} 50%{transform:scaleY(1.07) scaleX(.97)} }
+  .dtail { transform-box:fill-box; transform-origin:100% 100%; animation:twag .9s ease-in-out infinite; }
   @keyframes twag { 0%,100%{transform:rotate(-18deg)} 50%{transform:rotate(28deg)} }
-
-  /* Leg groups */
-  .dleg { transform-box: fill-box; transform-origin: 50% 0%; }
-
-  /* Walk */
-  #wdog.walk .dleg-fn { animation: lwP .44s ease-in-out infinite; }
-  #wdog.walk .dleg-ff { animation: lwN .44s ease-in-out infinite; }
-  #wdog.walk .dleg-bn { animation: lwN .44s ease-in-out infinite; }
-  #wdog.walk .dleg-bf { animation: lwP .44s ease-in-out infinite; }
+  .dleg  { transform-box:fill-box; transform-origin:50% 0%; }
+  #wdog.walk .dleg-fn { animation:lwP .44s ease-in-out infinite; }
+  #wdog.walk .dleg-ff { animation:lwN .44s ease-in-out infinite; }
+  #wdog.walk .dleg-bn { animation:lwN .44s ease-in-out infinite; }
+  #wdog.walk .dleg-bf { animation:lwP .44s ease-in-out infinite; }
   @keyframes lwP { 0%,100%{transform:rotate(-22deg)} 50%{transform:rotate(22deg)} }
   @keyframes lwN { 0%,100%{transform:rotate(22deg)}  50%{transform:rotate(-22deg)} }
-
-  /* Run */
-  #wdog.run .dleg-fn { animation: lrP .22s ease-in-out infinite; }
-  #wdog.run .dleg-ff { animation: lrN .22s ease-in-out infinite; }
-  #wdog.run .dleg-bn { animation: lrN .22s ease-in-out infinite; }
-  #wdog.run .dleg-bf { animation: lrP .22s ease-in-out infinite; }
+  #wdog.run .dleg-fn { animation:lrP .22s ease-in-out infinite; }
+  #wdog.run .dleg-ff { animation:lrN .22s ease-in-out infinite; }
+  #wdog.run .dleg-bn { animation:lrN .22s ease-in-out infinite; }
+  #wdog.run .dleg-bf { animation:lrP .22s ease-in-out infinite; }
   @keyframes lrP { 0%,100%{transform:rotate(-34deg)} 50%{transform:rotate(34deg)} }
   @keyframes lrN { 0%,100%{transform:rotate(34deg)}  50%{transform:rotate(-34deg)} }
-
-  /* Sit */
-  #wdog.sit .dleg-fn, #wdog.sit .dleg-ff { transform: rotate(52deg); }
-  #wdog.sit .dleg-bn, #wdog.sit .dleg-bf { transform: rotate(-28deg); }
-  #wdog.sit .dtail { animation: twagF .28s ease-in-out infinite; }
+  #wdog.sit .dleg-fn,#wdog.sit .dleg-ff { transform:rotate(52deg); }
+  #wdog.sit .dleg-bn,#wdog.sit .dleg-bf { transform:rotate(-28deg); }
+  #wdog.sit .dtail { animation:twagF .28s ease-in-out infinite; }
   @keyframes twagF { 0%,100%{transform:rotate(-30deg)} 50%{transform:rotate(44deg)} }
-
-  /* Body bob */
-  #wdog.walk .dbody { animation: bbob .44s ease-in-out infinite; }
-  #wdog.run  .dbody { animation: bbob .22s ease-in-out infinite; }
+  #wdog.walk .dbody { animation:bbob .44s ease-in-out infinite; }
+  #wdog.run  .dbody { animation:bbob .22s ease-in-out infinite; }
   @keyframes bbob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-2.5px)} }
-
-  /* Sniff */
-  .dhead { transform-box: fill-box; transform-origin: 50% 88%; }
-  #wdog.sniff .dhead { animation: sniffH .55s ease-in-out infinite; }
+  .dhead { transform-box:fill-box; transform-origin:50% 88%; }
+  #wdog.sniff .dhead { animation:sniffH .55s ease-in-out infinite; }
   @keyframes sniffH { 0%,100%{transform:rotate(-14deg)} 50%{transform:rotate(8deg)} }
-
-  /* Speech bubble */
-  .dbub {
-    position      : absolute; top: -36px; left: 50%;
-    transform     : translateX(-50%) scale(0);
-    background    : var(--amber); color: var(--bg);
-    font-size     : 12px; font-weight: 900;
-    padding       : 4px 10px; border-radius: 14px;
-    white-space   : nowrap;
-    box-shadow    : 0 4px 12px rgba(200,146,42,.5);
-    transition    : transform .28s cubic-bezier(.34,1.56,.64,1);
-    pointer-events: none;
-  }
-  .dbub::after {
-    content      : ''; position: absolute; bottom: -6px; left: 50%;
-    transform    : translateX(-50%);
-    border       : 6px solid transparent;
-    border-top-color: var(--amber); border-bottom: none;
-  }
-  #wdog.talking .dbub { transform: translateX(-50%) scale(1); }
-
-  /* Floating heart */
-  .dheart {
-    position   : absolute; top: -24px; right: 2px;
-    font-size  : 18px; opacity: 0;
-    transform  : translateY(0) scale(0.4);
-    transition : opacity .35s, transform .4s cubic-bezier(.34,1.56,.64,1);
-    pointer-events: none;
-  }
-  #wdog.sit .dheart { opacity: 1; transform: translateY(-10px) scale(1); }
+  .dbub { position:absolute; top:-36px; left:50%; transform:translateX(-50%) scale(0); background:var(--amber); color:var(--bg); font-size:12px; font-weight:900; padding:4px 10px; border-radius:14px; white-space:nowrap; box-shadow:0 4px 12px rgba(200,146,42,.5); transition:transform .28s cubic-bezier(.34,1.56,.64,1); pointer-events:none; }
+  .dbub::after { content:''; position:absolute; bottom:-6px; left:50%; transform:translateX(-50%); border:6px solid transparent; border-top-color:var(--amber); border-bottom:none; }
+  #wdog.talking .dbub { transform:translateX(-50%) scale(1); }
+  .dheart { position:absolute; top:-24px; right:2px; font-size:18px; opacity:0; transform:translateY(0) scale(.4); transition:opacity .35s,transform .4s cubic-bezier(.34,1.56,.64,1); pointer-events:none; }
+  #wdog.sit .dheart { opacity:1; transform:translateY(-10px) scale(1); }
   </style>
 </head>
 <body>
 
-<!-- ══ LOADING OVERLAY ════════════════════════════════════════ -->
+<!-- ══ LOADING ════════════════════════════════════════════════ -->
 <div id="db-loading" class="loading-overlay">
-  <svg width="56" height="56" viewBox="0 0 100 100" fill="#C8922A"
-       style="animation: loadingPulse 1.6s ease-in-out infinite">
-    <ellipse cx="50" cy="63" rx="24" ry="20"/>
-    <ellipse cx="19" cy="43" rx="12" ry="14"/>
-    <ellipse cx="37" cy="28" rx="12" ry="14"/>
-    <ellipse cx="63" cy="28" rx="12" ry="14"/>
+  <svg width="56" height="56" viewBox="0 0 100 100" fill="#C8922A" style="animation:loadingPulse 1.6s ease-in-out infinite">
+    <ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/>
+    <ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/>
     <ellipse cx="81" cy="43" rx="12" ry="14"/>
   </svg>
   <p>Carregant…</p>
@@ -868,85 +616,52 @@
 
 <!-- ══ HEADER ══════════════════════════════════════════════════ -->
 <header>
-  <!--
-    Fotos de Klaus al directori LAIA:
-      k1.jpg → primer pla (cara de prop)
-      k2.jpg → al camp   (foto vertical)
-      k3.jpg → al sofà   (foto horitzontal)
-  -->
-  <div class="blob blob-1">
-    <img src="k1.jpg" alt=""
-      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(145deg,#8AAABE,#C8D4E0)'" />
-  </div>
-  <div class="blob blob-2">
-    <img src="k2.jpg" alt=""
-      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(160deg,#7A9AAE,#A8C0D0)'" />
-  </div>
-  <div class="blob blob-3">
-    <img src="k3.jpg" alt=""
-      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(140deg,#90A8BC,#B8CAD8)'" />
-  </div>
-
+  <div class="blob blob-1"><img src="k1.jpg" alt="" onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(145deg,#8AAABE,#C8D4E0)'"/></div>
+  <div class="blob blob-2"><img src="k2.jpg" alt="" onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(160deg,#7A9AAE,#A8C0D0)'"/></div>
+  <div class="blob blob-3"><img src="k3.jpg" alt="" onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(140deg,#90A8BC,#B8CAD8)'"/></div>
   <div class="header-glow"></div>
   <div class="header-vignette"></div>
-
   <div class="header-inner">
-    <!-- Klaus SVG mascot -->
     <svg id="logo" class="header-logo" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
-      <!-- Orelles rose (APBT) -->
       <path d="M 68 58 Q 48 44 50 22 Q 54 8 72 15 Q 84 24 80 56 Z" fill="#445866"/>
       <path d="M 70 54 Q 55 42 57 26 Q 61 16 72 21 Q 80 30 76 52 Z" fill="#7A4C18" opacity=".72"/>
       <path d="M 152 58 Q 172 44 170 22 Q 166 8 148 15 Q 136 24 140 56 Z" fill="#445866"/>
       <path d="M 150 54 Q 165 42 163 26 Q 159 16 148 21 Q 140 30 144 52 Z" fill="#7A4C18" opacity=".72"/>
-      <!-- Cap -->
       <path d="M 50 70 Q 48 46 68 40 Q 90 33 110 33 Q 130 33 152 40 Q 172 46 170 70 L 176 150 Q 176 185 110 188 Q 44 185 44 150 Z" fill="#6E8090"/>
-      <!-- Llum frontal -->
       <ellipse cx="110" cy="84" rx="54" ry="34" fill="#8AA2B0" opacity=".3"/>
-      <!-- Blaze -->
       <path d="M110 46 Q117 68 114 90 Q110 108 106 90 Q103 68 110 46" fill="#9AB4C0" opacity=".28"/>
-      <!-- Morro -->
       <ellipse cx="110" cy="158" rx="58" ry="42" fill="#B0A090"/>
       <ellipse cx="110" cy="154" rx="48" ry="33" fill="#BEB2A2" opacity=".6"/>
       <path d="M 56 128 Q 110 118 164 128" fill="none" stroke="#5A7080" stroke-width="1.5" opacity=".35"/>
-      <!-- Ulls -->
       <ellipse cx="74"  cy="114" rx="23" ry="22" fill="#F2EAD8"/>
       <ellipse cx="74"  cy="114" rx="14.5" ry="14" fill="#C8922A"/>
       <ellipse cx="74"  cy="114" rx="14.5" ry="14" fill="none" stroke="#986010" stroke-width="2"/>
-      <ellipse cx="74"  cy="114" rx="8"  ry="7.5" fill="#D8A832" opacity=".38"/>
-      <ellipse cx="75"  cy="115" rx="8"  ry="9"   fill="#0A0804"/>
+      <ellipse cx="74"  cy="114" rx="8" ry="7.5" fill="#D8A832" opacity=".38"/>
+      <ellipse cx="75"  cy="115" rx="8" ry="9"   fill="#0A0804"/>
       <circle  cx="68"  cy="108" r="4.5" fill="white" opacity=".9"/>
       <circle  cx="80"  cy="119" r="2"   fill="white" opacity=".38"/>
       <ellipse cx="146" cy="114" rx="23" ry="22" fill="#F2EAD8"/>
       <ellipse cx="146" cy="114" rx="14.5" ry="14" fill="#C8922A"/>
       <ellipse cx="146" cy="114" rx="14.5" ry="14" fill="none" stroke="#986010" stroke-width="2"/>
-      <ellipse cx="146" cy="114" rx="8"  ry="7.5" fill="#D8A832" opacity=".38"/>
-      <ellipse cx="147" cy="115" rx="8"  ry="9"   fill="#0A0804"/>
+      <ellipse cx="146" cy="114" rx="8" ry="7.5" fill="#D8A832" opacity=".38"/>
+      <ellipse cx="147" cy="115" rx="8" ry="9"   fill="#0A0804"/>
       <circle  cx="140" cy="108" r="4.5" fill="white" opacity=".9"/>
       <circle  cx="152" cy="119" r="2"   fill="white" opacity=".38"/>
-      <!-- Nas -->
       <path d="M 94 140 Q 110 133 126 140 Q 132 149 126 155 Q 110 160 94 155 Q 88 149 94 140 Z" fill="#141010"/>
       <ellipse cx="102" cy="147" rx="4.5" ry="3" fill="#201C18" opacity=".55"/>
       <ellipse cx="118" cy="147" rx="4.5" ry="3" fill="#201C18" opacity=".55"/>
       <path d="M 96 140 Q 110 135 124 140" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="2.5" stroke-linecap="round"/>
-      <!-- Boca -->
       <path d="M 110 158 Q 92 167 82 163"  fill="none" stroke="#806050" stroke-width="2" stroke-linecap="round"/>
       <path d="M 110 158 Q 128 167 138 163" fill="none" stroke="#806050" stroke-width="2" stroke-linecap="round"/>
-      <!-- Collar -->
       <rect x="36" y="180" width="148" height="21" rx="10.5" fill="#C8922A"/>
       <rect x="36" y="180" width="148" height="7"  rx="4"    fill="rgba(255,255,255,.15)"/>
       <circle cx="62"  cy="190" r="5" fill="#D8B060"/>
       <circle cx="158" cy="190" r="5" fill="#D8B060"/>
-      <!-- Medalla K -->
       <circle cx="110" cy="203" r="14" fill="#D0A050"/>
       <circle cx="110" cy="203" r="11" fill="#C8922A"/>
       <text x="110" y="207" text-anchor="middle" font-size="12" font-weight="900" fill="#180E02" font-family="Arial,sans-serif">K</text>
     </svg>
-
-    <div class="header-text">
-      <h1>Laia's Space</h1>
-      <p class="sub">amb Klaus</p>
-    </div>
-
+    <div class="header-text"><h1>Laia's Space</h1><p class="sub">amb Klaus</p></div>
     <div class="header-date" id="header-date"></div>
   </div>
 </header>
@@ -956,24 +671,19 @@
 
   <!-- Columna esquerra -->
   <div>
-
     <!-- Calendari -->
     <div class="card">
       <div class="card-title">
         <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
         Calendari
       </div>
-
       <div class="cal-header">
         <button class="cal-nav" id="prev-month">&#8249;</button>
         <div class="cal-month" id="cal-label"></div>
         <button class="cal-nav" id="next-month">&#8250;</button>
       </div>
-
       <div class="cal-grid" id="cal-grid"></div>
-
       <div class="sel-info" id="sel-info">Selecciona un dia per veure o afegir tasques</div>
-
       <div class="quick-add" id="quick-add" style="display:none">
         <input type="text" id="qa-input" placeholder="Tasca ràpida per a aquest dia…" />
         <button id="qa-btn">+</button>
@@ -993,7 +703,7 @@
       </div>
     </div>
 
-    <!-- Fotos de Klaus -->
+    <!-- Fotos -->
     <div class="card">
       <div class="card-title">
         <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
@@ -1002,8 +712,7 @@
       <div class="photo-grid" id="photo-grid"></div>
       <div class="photos-full" id="photos-full" style="display:none">Màxim assolit · 9 / 9</div>
     </div>
-
-  </div><!-- /columna esquerra -->
+  </div>
 
   <!-- Columna dreta: Tasques -->
   <div class="card">
@@ -1012,19 +721,44 @@
       Tasques
     </div>
 
+    <!-- Add form -->
     <div class="todo-add">
-      <input type="text"  class="todo-input" id="todo-input"    placeholder="Què has de fer avui?" />
-      <div class="add-opts">
+      <!-- Fila 1: text -->
+      <input type="text" class="todo-input" id="todo-input" placeholder="Què has de fer avui?" />
+
+      <!-- Fila 2: tags -->
+      <div class="tag-selector" id="tag-selector">
+        <button class="tag-toggle" data-tag="treball">💼 Treball</button>
+        <button class="tag-toggle" data-tag="personal">👤 Personal</button>
+        <button class="tag-toggle" data-tag="casa">🏠 Casa</button>
+        <button class="tag-toggle" data-tag="compres">🛒 Compres</button>
+        <button class="tag-toggle" data-tag="salut">❤️ Salut</button>
+        <button class="tag-toggle" data-tag="klaus">🐾 Klaus</button>
+      </div>
+
+      <!-- Fila 3: data, hora, prioritat, colors, botó -->
+      <div class="add-opts-row">
         <input type="date" class="opt" id="todo-date" />
+        <input type="time" class="opt" id="todo-time" />
         <select class="opt" id="todo-priority">
           <option value="normal">· Normal</option>
           <option value="high">! Urgent</option>
           <option value="low">↓ Baixa</option>
         </select>
+        <div class="color-picker" id="color-picker">
+          <div class="color-dot none sel" data-color=""     title="Sense color"></div>
+          <div class="color-dot"          data-color="#C8922A" style="background:#C8922A" title="Ambre"></div>
+          <div class="color-dot"          data-color="#4A7EC0" style="background:#4A7EC0" title="Blau"></div>
+          <div class="color-dot"          data-color="#9060C0" style="background:#9060C0" title="Violeta"></div>
+          <div class="color-dot"          data-color="#50A060" style="background:#50A060" title="Verd"></div>
+          <div class="color-dot"          data-color="#C04060" style="background:#C04060" title="Rosa"></div>
+          <div class="color-dot"          data-color="#C07830" style="background:#C07830" title="Taronja"></div>
+        </div>
+        <button class="add-btn" id="add-btn">Afegir ✦</button>
       </div>
-      <button class="add-btn" id="add-btn">Afegir ✦</button>
     </div>
 
+    <!-- Filters + tag filter row -->
     <div class="filters">
       <button class="filter-btn active" data-filter="all">Tot</button>
       <button class="filter-btn" data-filter="active">Actives</button>
@@ -1033,27 +767,28 @@
       <button class="filter-btn" data-filter="today">Avui</button>
       <button class="clear-btn" id="clear-btn">Netejar fetes</button>
     </div>
+    <div class="tag-filter-row" id="tag-filter-row"></div>
 
     <div class="todo-list" id="todo-list"></div>
-  </div><!-- /columna dreta -->
+  </div>
 
 </main>
 
-<!-- Klaus ulls asomant-se -->
+<!-- Eyes peek -->
 <svg class="eyes-peek" viewBox="0 0 150 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <ellipse cx="75"  cy="95" rx="72" ry="48" fill="#6E8090"/>
-  <ellipse cx="18"  cy="78" rx="18" ry="15" fill="#5A6E80"/>
+  <ellipse cx="75" cy="95" rx="72" ry="48" fill="#6E8090"/>
+  <ellipse cx="18" cy="78" rx="18" ry="15" fill="#5A6E80"/>
   <ellipse cx="132" cy="78" rx="18" ry="15" fill="#5A6E80"/>
-  <path d="M 26 46 Q 8 30 16 16 Q 22 6 34 18 Q 40 30 36 50 Z"   fill="#445866"/>
+  <path d="M 26 46 Q 8 30 16 16 Q 22 6 34 18 Q 40 30 36 50 Z" fill="#445866"/>
   <path d="M 124 46 Q 142 30 134 16 Q 128 6 116 18 Q 110 30 114 50 Z" fill="#445866"/>
   <ellipse cx="48"  cy="54" rx="21" ry="20" fill="#F2EAD8"/>
   <ellipse cx="102" cy="54" rx="21" ry="20" fill="#F2EAD8"/>
   <ellipse cx="48"  cy="54" rx="13" ry="12.5" fill="#C8922A"/>
   <ellipse cx="102" cy="54" rx="13" ry="12.5" fill="#C8922A"/>
-  <ellipse cx="49"  cy="55" rx="7"  ry="7.5"  fill="#0A0804"/>
-  <ellipse cx="103" cy="55" rx="7"  ry="7.5"  fill="#0A0804"/>
-  <circle  cx="43"  cy="48" r="3.5" fill="white" opacity=".9"/>
-  <circle  cx="97"  cy="48" r="3.5" fill="white" opacity=".9"/>
+  <ellipse cx="49"  cy="55" rx="7" ry="7.5"  fill="#0A0804"/>
+  <ellipse cx="103" cy="55" rx="7" ry="7.5"  fill="#0A0804"/>
+  <circle cx="43" cy="48" r="3.5" fill="white" opacity=".9"/>
+  <circle cx="97" cy="48" r="3.5" fill="white" opacity=".9"/>
   <path d="M 32 38 Q 48 31 64 38"  fill="none" stroke="#445866" stroke-width="2.5" stroke-linecap="round"/>
   <path d="M 86 38 Q 102 31 118 38" fill="none" stroke="#445866" stroke-width="2.5" stroke-linecap="round"/>
 </svg>
@@ -1061,62 +796,37 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file-input" accept="image/*" multiple style="display:none" />
 
-<!-- ══ CURSOR PET — CHIBI KLAUS ════════════════════════════════ -->
+<!-- ══ CURSOR PET ══════════════════════════════════════════════ -->
 <div id="wdog" class="walk" aria-hidden="true">
   <div class="dheart">💛</div>
   <div class="dbub" id="dog-bubble">🐾 Bau!</div>
   <svg viewBox="0 0 82 72" xmlns="http://www.w3.org/2000/svg">
-    <!-- Tail -->
-    <g class="dtail">
-      <path d="M 13 42 Q 3 28 7 14 Q 10 6 15 10"
-            fill="none" stroke="#6E8090" stroke-width="6" stroke-linecap="round"/>
-    </g>
-    <!-- Body -->
-    <g class="dbody">
-      <ellipse cx="36" cy="49" rx="22" ry="13" fill="#6E8090"/>
-      <ellipse cx="36" cy="43" rx="16" ry="8"  fill="#8AAABE" opacity=".22"/>
-    </g>
-    <!-- Back legs -->
-    <g class="dleg dleg-bf">
-      <line x1="23" y1="59" x2="20" y2="72" stroke="#445566" stroke-width="7" stroke-linecap="round"/>
-      <ellipse cx="19.5" cy="72" rx="5.5" ry="3" fill="#374456"/>
-    </g>
-    <g class="dleg dleg-bn">
-      <line x1="31" y1="59" x2="28" y2="72" stroke="#5E7080" stroke-width="7" stroke-linecap="round"/>
-      <ellipse cx="27.5" cy="72" rx="5.5" ry="3" fill="#4E6070"/>
-    </g>
-    <!-- Head -->
+    <g class="dtail"><path d="M 13 42 Q 3 28 7 14 Q 10 6 15 10" fill="none" stroke="#6E8090" stroke-width="6" stroke-linecap="round"/></g>
+    <g class="dbody"><ellipse cx="36" cy="49" rx="22" ry="13" fill="#6E8090"/><ellipse cx="36" cy="43" rx="16" ry="8" fill="#8AAABE" opacity=".22"/></g>
+    <g class="dleg dleg-bf"><line x1="23" y1="59" x2="20" y2="72" stroke="#445566" stroke-width="7" stroke-linecap="round"/><ellipse cx="19.5" cy="72" rx="5.5" ry="3" fill="#374456"/></g>
+    <g class="dleg dleg-bn"><line x1="31" y1="59" x2="28" y2="72" stroke="#5E7080" stroke-width="7" stroke-linecap="round"/><ellipse cx="27.5" cy="72" rx="5.5" ry="3" fill="#4E6070"/></g>
     <g class="dhead">
-      <ellipse cx="50" cy="36" rx="3"  ry="5"  fill="#6A7E90"/>
-      <circle  cx="58" cy="22" r="20"  fill="#7A8E9E"/>
-      <ellipse cx="55" cy="15" rx="12" ry="8"  fill="#8AAABE" opacity=".22"/>
-      <path d="M 58  5 Q 70 -1 73  9 Q 70 18 58 14 Z" fill="#526070"/>
-      <path d="M 58  7 Q 67  3 70 10 Q 67 16 58 13 Z" fill="#8A6030" opacity=".58"/>
+      <ellipse cx="50" cy="36" rx="3" ry="5" fill="#6A7E90"/>
+      <circle cx="58" cy="22" r="20" fill="#7A8E9E"/>
+      <ellipse cx="55" cy="15" rx="12" ry="8" fill="#8AAABE" opacity=".22"/>
+      <path d="M 58 5 Q 70 -1 73 9 Q 70 18 58 14 Z" fill="#526070"/>
+      <path d="M 58 7 Q 67 3 70 10 Q 67 16 58 13 Z" fill="#8A6030" opacity=".58"/>
       <ellipse cx="72" cy="30" rx="13" ry="10" fill="#B8A898"/>
       <ellipse cx="72" cy="27" rx="10" ry="7"  fill="#C8BAA8" opacity=".5"/>
       <circle cx="64" cy="18" r="7.5" fill="#F0E8D0"/>
       <circle cx="64" cy="18" r="5"   fill="#C8922A"/>
       <circle cx="64" cy="18" r="3"   fill="#0A0804"/>
       <circle cx="62" cy="16" r="1.5" fill="white" opacity=".92"/>
-      <circle cx="67" cy="21" r="0.8" fill="white" opacity=".4"/>
+      <circle cx="67" cy="21" r=".8"  fill="white" opacity=".4"/>
       <ellipse cx="83" cy="28" rx="4.5" ry="3.5" fill="#141010"/>
       <ellipse cx="82" cy="27" rx="2"   ry="1.2"  fill="white" opacity=".12"/>
-      <!-- Collar -->
       <rect x="47" y="37" width="18" height="6" rx="3" fill="#C8922A"/>
       <circle cx="56" cy="45" r="4.5" fill="#D4A050"/>
       <circle cx="56" cy="45" r="3.5" fill="#C8922A"/>
-      <text x="56" y="48" text-anchor="middle"
-            font-size="4" font-weight="900" fill="#180E02" font-family="Arial,sans-serif">K</text>
+      <text x="56" y="48" text-anchor="middle" font-size="4" font-weight="900" fill="#180E02" font-family="Arial,sans-serif">K</text>
     </g>
-    <!-- Front legs -->
-    <g class="dleg dleg-ff">
-      <line x1="46" y1="59" x2="43" y2="72" stroke="#5A7080" stroke-width="7" stroke-linecap="round"/>
-      <ellipse cx="42.5" cy="72" rx="5.5" ry="3" fill="#4A6070"/>
-    </g>
-    <g class="dleg dleg-fn">
-      <line x1="54" y1="59" x2="51" y2="72" stroke="#6E8090" stroke-width="7" stroke-linecap="round"/>
-      <ellipse cx="50.5" cy="72" rx="5.5" ry="3" fill="#5E7280"/>
-    </g>
+    <g class="dleg dleg-ff"><line x1="46" y1="59" x2="43" y2="72" stroke="#5A7080" stroke-width="7" stroke-linecap="round"/><ellipse cx="42.5" cy="72" rx="5.5" ry="3" fill="#4A6070"/></g>
+    <g class="dleg dleg-fn"><line x1="54" y1="59" x2="51" y2="72" stroke="#6E8090" stroke-width="7" stroke-linecap="round"/><ellipse cx="50.5" cy="72" rx="5.5" ry="3" fill="#5E7280"/></g>
   </svg>
 </div>
 
@@ -1130,29 +840,31 @@
 const MESOS     = ['Gener','Febrer','Març','Abril','Maig','Juny','Juliol','Agost','Setembre','Octubre','Novembre','Desembre'];
 const DIES      = ['Diumenge','Dilluns','Dimarts','Dimecres','Dijous','Divendres','Dissabte'];
 const DIES7     = ['Dg','Dl','Dt','Dc','Dj','Dv','Ds'];
-const MISSATGES = ['🐾 Bau!', '💛 Klaus t\'estima!', '🐕 Bon gos!', '✨ Hola Laia!', '🦴 Tasques fetes?'];
+const MISSATGES = ['🐾 Bau!','💛 Klaus t\'estima!','🐕 Bon gos!','✨ Hola Laia!','🦴 Tasques fetes?'];
+
+/* Fase 1 — definició de tags */
+const TAGS = {
+  treball : { label:'Treball',  emoji:'💼', color:'#4A7EC0' },
+  personal: { label:'Personal', emoji:'👤', color:'#9060C0' },
+  casa    : { label:'Casa',     emoji:'🏠', color:'#50A060' },
+  compres : { label:'Compres',  emoji:'🛒', color:'#C07830' },
+  salut   : { label:'Salut',    emoji:'❤️', color:'#C04060' },
+  klaus   : { label:'Klaus',    emoji:'🐾', color:'#C8922A' },
+};
 
 /* ─── UTILS ──────────────────────────────────────────────────── */
 const $   = id => document.getElementById(id);
 const pad = n  => String(n).padStart(2, '0');
-
-function dateStr(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function today() { return dateStr(new Date()); }
-
-function fmtShort(s) {
-  if (!s) return '';
-  const [, m, d] = s.split('-');
-  return `${d}/${m}`;
-}
+function dateStr(d) { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function today()    { return dateStr(new Date()); }
+function fmtShort(s) { if (!s) return ''; const [,m,d] = s.split('-'); return `${d}/${m}`; }
 
 function toast(msg) {
   const el = $('toast');
   el.textContent = msg;
   el.classList.add('show');
-  clearTimeout(el._timer);
-  el._timer = setTimeout(() => el.classList.remove('show'), 2500);
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2500);
 }
 
 function renderHeaderDate() {
@@ -1168,91 +880,48 @@ const Calendar = {
   selectedDay: null,
 
   render() {
-    const y    = this.viewDate.getFullYear();
-    const m    = this.viewDate.getMonth();
-    const grid = $('cal-grid');
-    const tod  = today();
-    const todos = DB.getTodos();
-
+    const y = this.viewDate.getFullYear(), m = this.viewDate.getMonth();
+    const grid = $('cal-grid'), tod = today(), todos = DB.getTodos();
     $('cal-label').textContent = `${MESOS[m]} ${y}`;
     grid.innerHTML = '';
-
-    // Day-of-week headers
-    DIES7.forEach(d => {
+    DIES7.forEach(d => { const el = document.createElement('div'); el.className='cal-dname'; el.textContent=d; grid.appendChild(el); });
+    const firstDow = new Date(y,m,1).getDay(), daysInMo = new Date(y,m+1,0).getDate(), prevDays = new Date(y,m,0).getDate();
+    for (let i=firstDow-1; i>=0; i--) { const el=document.createElement('div'); el.className='cal-day other'; el.textContent=prevDays-i; grid.appendChild(el); }
+    for (let d=1; d<=daysInMo; d++) {
+      const ds = `${y}-${pad(m+1)}-${pad(d)}`;
       const el = document.createElement('div');
-      el.className   = 'cal-dname';
-      el.textContent = d;
-      grid.appendChild(el);
-    });
-
-    const firstDow = new Date(y, m, 1).getDay();
-    const daysInMo = new Date(y, m + 1, 0).getDate();
-    const prevDays = new Date(y, m, 0).getDate();
-
-    // Previous-month padding
-    for (let i = firstDow - 1; i >= 0; i--) {
-      const el = document.createElement('div');
-      el.className   = 'cal-day other';
-      el.textContent = prevDays - i;
-      grid.appendChild(el);
-    }
-
-    // Current-month days
-    for (let d = 1; d <= daysInMo; d++) {
-      const ds = `${y}-${pad(m + 1)}-${pad(d)}`;
-      const el = document.createElement('div');
-      el.className   = 'cal-day';
-      el.textContent = d;
-      if (ds === tod)              el.classList.add('today');
-      if (ds === this.selectedDay) el.classList.add('sel');
-      if (todos.some(t => t.date === ds)) el.classList.add('has-t');
+      el.className='cal-day'; el.textContent=d;
+      if (ds===tod)              el.classList.add('today');
+      if (ds===this.selectedDay) el.classList.add('sel');
+      if (todos.some(t=>t.date===ds)) el.classList.add('has-t');
       el.addEventListener('click', () => this.pickDay(ds));
       grid.appendChild(el);
     }
-
-    // Next-month padding
-    const total = firstDow + daysInMo;
-    const rem   = total % 7 === 0 ? 0 : 7 - (total % 7);
-    for (let d = 1; d <= rem; d++) {
-      const el = document.createElement('div');
-      el.className   = 'cal-day other';
-      el.textContent = d;
-      grid.appendChild(el);
-    }
+    const total=firstDow+daysInMo, rem=total%7===0?0:7-(total%7);
+    for (let d=1; d<=rem; d++) { const el=document.createElement('div'); el.className='cal-day other'; el.textContent=d; grid.appendChild(el); }
   },
 
   pickDay(ds) {
     this.selectedDay = ds;
     this.render();
-
     const todos = DB.getTodosByDate(ds);
-    const [y, m, d] = ds.split('-');
-    const pend = todos.filter(t => !t.completed).length;
-
-    $('sel-info').textContent = todos.length === 0
+    const [y,m,d] = ds.split('-');
+    const pend = todos.filter(t=>!t.completed).length;
+    $('sel-info').textContent = todos.length===0
       ? `${d}/${m}/${y} — cap tasca encara`
-      : `${d}/${m}/${y} — ${todos.length} tasca${todos.length > 1 ? 'ques' : ''}, ${pend} activa${pend !== 1 ? 'ques' : ''}`;
-
-    $('quick-add').style.display = 'flex';
+      : `${d}/${m}/${y} — ${todos.length} tasca${todos.length>1?'ques':''}, ${pend} activa${pend!==1?'ques':''}`;
+    $('quick-add').style.display='flex';
     $('qa-input').focus();
     Todos.setFilter('day', false);
   },
 
-  prevMonth() {
-    this.viewDate = new Date(this.viewDate.getFullYear(), this.viewDate.getMonth() - 1, 1);
-    this.render();
-  },
-
-  nextMonth() {
-    this.viewDate = new Date(this.viewDate.getFullYear(), this.viewDate.getMonth() + 1, 1);
-    this.render();
-  },
+  prevMonth() { this.viewDate = new Date(this.viewDate.getFullYear(), this.viewDate.getMonth()-1, 1); this.render(); },
+  nextMonth() { this.viewDate = new Date(this.viewDate.getFullYear(), this.viewDate.getMonth()+1, 1); this.render(); },
 
   quickAdd() {
-    const inp  = $('qa-input');
-    const text = inp.value.trim();
+    const inp = $('qa-input'), text = inp.value.trim();
     if (!text || !this.selectedDay) return;
-    DB.addTodo(text, this.selectedDay, 'normal');
+    DB.addTodo(text, this.selectedDay);
     inp.value = '';
     refresh();
     toast('🐾 Tasca afegida per al ' + fmtShort(this.selectedDay));
@@ -1261,13 +930,63 @@ const Calendar = {
 
 /* ─── TODOS ──────────────────────────────────────────────────── */
 const Todos = {
-  filter: 'all',
+  filter   : 'all',
+  activeTag: null,      // tag filter
+  _selTags : [],        // tags selected in add form
+  _selColor: '',        // color selected in add form
 
+  /* ── Tag / color selection in add form ──────────────────── */
+  toggleAddTag(tag) {
+    const i = this._selTags.indexOf(tag);
+    if (i >= 0) this._selTags.splice(i, 1);
+    else this._selTags.push(tag);
+    document.querySelectorAll('.tag-toggle').forEach(b =>
+      b.classList.toggle('active', this._selTags.includes(b.dataset.tag))
+    );
+  },
+
+  selectColor(color) {
+    this._selColor = color;
+    document.querySelectorAll('.color-dot').forEach(d =>
+      d.classList.toggle('sel', d.dataset.color === color)
+    );
+  },
+
+  resetForm() {
+    $('todo-input').value    = '';
+    $('todo-date').value     = '';
+    $('todo-time').value     = '';
+    $('todo-priority').value = 'normal';
+    this._selTags  = [];
+    this._selColor = '';
+    document.querySelectorAll('.tag-toggle').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.color-dot').forEach(d => d.classList.toggle('sel', d.dataset.color===''));
+  },
+
+  /* ── Tag filter row ─────────────────────────────────────── */
+  renderTagFilterRow() {
+    const row = $('tag-filter-row');
+    row.innerHTML = '';
+    Object.entries(TAGS).forEach(([key, t]) => {
+      const btn = document.createElement('button');
+      btn.className   = 'tag-filter-btn' + (this.activeTag===key ? ' active' : '');
+      btn.dataset.tag = key;
+      btn.textContent = `${t.emoji} ${t.label}`;
+      btn.style.cssText = `color:${t.color};border-color:${t.color}44`;
+      btn.addEventListener('click', () => {
+        this.activeTag = this.activeTag===key ? null : key;
+        this.renderTagFilterRow();
+        this.render();
+      });
+      row.appendChild(btn);
+    });
+  },
+
+  /* ── Paw checkbox ───────────────────────────────────────── */
   makePawChk(id, checked) {
     const div = document.createElement('div');
-    div.className  = `chk${checked ? ' on' : ''}`;
-    div.dataset.id = id;
-    div.innerHTML  = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    div.className = `chk${checked?' on':''}`;
+    div.innerHTML = `<svg viewBox="0 0 100 100">
       <ellipse class="paw-empty" cx="50" cy="63" rx="24" ry="20"/>
       <ellipse class="paw-empty" cx="19" cy="43" rx="12" ry="14"/>
       <ellipse class="paw-empty" cx="37" cy="28" rx="12" ry="14"/>
@@ -1287,117 +1006,194 @@ const Todos = {
     return div;
   },
 
+  /* ── Main render ────────────────────────────────────────── */
   render() {
     const list = $('todo-list');
     const tod  = today();
     let todos  = DB.getTodos();
 
-    // Apply active filter
+    /* Status filter */
     switch (this.filter) {
-      case 'active'   : todos = todos.filter(t => !t.completed);                           break;
-      case 'completed': todos = todos.filter(t =>  t.completed);                           break;
-      case 'high'     : todos = todos.filter(t =>  t.priority === 'high' && !t.completed); break;
-      case 'today'    : todos = todos.filter(t =>  t.date === tod);                        break;
-      case 'day'      : todos = todos.filter(t =>  t.date === Calendar.selectedDay);       break;
+      case 'active'   : todos = todos.filter(t => !t.completed); break;
+      case 'completed': todos = todos.filter(t =>  t.completed); break;
+      case 'high'     : todos = todos.filter(t =>  t.priority==='high' && !t.completed); break;
+      case 'today'    : todos = todos.filter(t =>  t.date===tod); break;
+      case 'day'      : todos = todos.filter(t =>  t.date===Calendar.selectedDay); break;
+    }
+
+    /* Tag filter */
+    if (this.activeTag) {
+      todos = todos.filter(t => t.tags && t.tags.split(',').includes(this.activeTag));
     }
 
     list.innerHTML = '';
 
     if (todos.length === 0) {
-      list.innerHTML = `
-        <div class="empty-state">
-          <svg width="56" height="44" viewBox="0 0 150 100" fill="rgba(200,146,42,.22)">
-            <ellipse cx="75"  cy="95" rx="72" ry="44"/>
-            <ellipse cx="48"  cy="54" rx="21" ry="20" fill="#F2EAD8" opacity=".5"/>
-            <ellipse cx="102" cy="54" rx="21" ry="20" fill="#F2EAD8" opacity=".5"/>
-            <ellipse cx="48"  cy="54" rx="12" ry="11.5" fill="#C8922A" opacity=".6"/>
-            <ellipse cx="102" cy="54" rx="12" ry="11.5" fill="#C8922A" opacity=".6"/>
-            <circle  cx="43"  cy="48" r="3"   fill="white" opacity=".6"/>
-            <circle  cx="97"  cy="48" r="3"   fill="white" opacity=".6"/>
-          </svg>
-          <p>Res per fer. En Klaus aprova.</p>
-        </div>`;
+      list.innerHTML = `<div class="empty-state">
+        <svg width="56" height="44" viewBox="0 0 150 100" fill="rgba(200,146,42,.22)">
+          <ellipse cx="75" cy="95" rx="72" ry="44"/>
+          <ellipse cx="48" cy="54" rx="21" ry="20" fill="#F2EAD8" opacity=".5"/>
+          <ellipse cx="102" cy="54" rx="21" ry="20" fill="#F2EAD8" opacity=".5"/>
+          <ellipse cx="48" cy="54" rx="12" ry="11.5" fill="#C8922A" opacity=".6"/>
+          <ellipse cx="102" cy="54" rx="12" ry="11.5" fill="#C8922A" opacity=".6"/>
+          <circle cx="43" cy="48" r="3" fill="white" opacity=".6"/>
+          <circle cx="97" cy="48" r="3" fill="white" opacity=".6"/>
+        </svg>
+        <p>Res per fer. En Klaus aprova.</p>
+      </div>`;
       return;
     }
 
-    // Sort: incomplete first, then high priority, then by date
-    todos.sort((a, b) => {
-      if (a.completed !== b.completed)                       return a.completed ? 1 : -1;
-      if (a.priority === 'high' && b.priority !== 'high')   return -1;
-      if (b.priority === 'high' && a.priority !== 'high')   return  1;
-      if (a.date && b.date)                                  return a.date.localeCompare(b.date);
-      if (a.date)  return -1;
-      if (b.date)  return  1;
+    /* Sort */
+    todos.sort((a,b) => {
+      if (a.completed!==b.completed)                     return a.completed?1:-1;
+      if (a.priority==='high'&&b.priority!=='high')      return -1;
+      if (b.priority==='high'&&a.priority!=='high')      return  1;
+      if (a.date&&b.date)                                return a.date.localeCompare(b.date);
+      if (a.date) return -1;
+      if (b.date) return  1;
       return 0;
     });
 
     todos.forEach(todo => {
-      const el     = document.createElement('div');
-      el.className = `todo-item p-${todo.priority}${todo.completed ? ' completed' : ''}`;
+      /* ── Container ─ */
+      const el = document.createElement('div');
+      el.className = `todo-item p-${todo.priority}${todo.completed?' completed':''}`;
+      if (todo.color) el.style.borderLeftColor = todo.color;
 
-      // Checkbox
+      /* ── Checkbox ─ */
       el.appendChild(this.makePawChk(todo.id, todo.completed));
 
-      // Text
-      const txt      = document.createElement('span');
-      txt.className  = 'todo-text';
-      txt.textContent = todo.text;
-      el.appendChild(txt);
+      /* ── Body ─ */
+      const body   = document.createElement('div');
+      body.className = 'todo-body';
 
-      // Badges
-      const badges = document.createElement('div');
-      badges.style.cssText = 'display:flex;gap:4px;flex-shrink:0';
-      if (todo.priority === 'high' && !todo.completed) {
+      /* Top row */
+      const topRow = document.createElement('div');
+      topRow.className = 'todo-top';
+
+      const txt = document.createElement('span');
+      txt.className   = 'todo-text';
+      txt.textContent = todo.text;
+      topRow.appendChild(txt);
+
+      /* Meta: tags + time + date + priority */
+      const meta = document.createElement('div');
+      meta.className = 'todo-meta';
+
+      if (todo.tags) {
+        todo.tags.split(',').filter(Boolean).forEach(key => {
+          const t = TAGS[key]; if (!t) return;
+          const pill = document.createElement('span');
+          pill.className   = `tag-pill tag-${key}`;
+          pill.textContent = `${t.emoji} ${t.label}`;
+          meta.appendChild(pill);
+        });
+      }
+      if (todo.time) {
         const b = document.createElement('span');
-        b.className   = 'todo-badge badge-high';
-        b.textContent = 'Urgent';
-        badges.appendChild(b);
+        b.className = 'todo-badge badge-time';
+        b.textContent = todo.time;
+        meta.appendChild(b);
       }
       if (todo.date) {
         const b = document.createElement('span');
-        b.className   = 'todo-badge badge-date';
+        b.className = 'todo-badge badge-date';
         b.textContent = fmtShort(todo.date);
-        badges.appendChild(b);
+        meta.appendChild(b);
       }
-      el.appendChild(badges);
+      if (todo.priority==='high' && !todo.completed) {
+        const b = document.createElement('span');
+        b.className = 'todo-badge badge-high';
+        b.textContent = 'Urgent';
+        meta.appendChild(b);
+      }
+      topRow.appendChild(meta);
 
-      // Delete button
-      const del = document.createElement('button');
-      del.className   = 'del-btn';
-      del.title       = 'Eliminar';
-      del.textContent = '×';
-      del.addEventListener('click', () => {
+      /* Actions: expand + delete */
+      const actions = document.createElement('div');
+      actions.className = 'todo-actions';
+
+      const expandBtn = document.createElement('button');
+      expandBtn.className = 'expand-btn';
+      expandBtn.title     = 'Notes';
+      expandBtn.textContent = '▾';
+
+      const delBtn = document.createElement('button');
+      delBtn.className   = 'del-btn';
+      delBtn.title       = 'Eliminar';
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', () => {
         el.classList.add('removing');
         setTimeout(() => { DB.deleteTodo(todo.id); refresh(); }, 280);
       });
-      el.appendChild(del);
+
+      actions.appendChild(expandBtn);
+      actions.appendChild(delBtn);
+      topRow.appendChild(actions);
+
+      body.appendChild(topRow);
+
+      /* Detail: notes textarea */
+      const detail = document.createElement('div');
+      detail.className = `todo-detail${todo.notes ? ' open' : ''}`;
+      if (todo.notes) expandBtn.classList.add('open');
+
+      const noteArea = document.createElement('textarea');
+      noteArea.className   = 'note-area';
+      noteArea.placeholder = 'Afegir notes…';
+      noteArea.value       = todo.notes || '';
+
+      /* Auto-save notes with debounce */
+      let noteTimer;
+      noteArea.addEventListener('input', () => {
+        clearTimeout(noteTimer);
+        noteTimer = setTimeout(() => DB.updateTodo(todo.id, { notes: noteArea.value }), 700);
+      });
+
+      detail.appendChild(noteArea);
+      body.appendChild(detail);
+      el.appendChild(body);
+
+      /* Expand toggle */
+      expandBtn.addEventListener('click', () => {
+        const open = detail.classList.toggle('open');
+        expandBtn.classList.toggle('open', open);
+        if (open) noteArea.focus();
+      });
 
       list.appendChild(el);
     });
   },
 
+  /* ── Add ────────────────────────────────────────────────── */
   add() {
     const inp  = $('todo-input');
     const text = inp.value.trim();
     if (!text) {
       inp.classList.add('shake');
-      inp.addEventListener('animationend', () => inp.classList.remove('shake'), { once: true });
+      inp.addEventListener('animationend', () => inp.classList.remove('shake'), { once:true });
       inp.focus();
       return;
     }
-    DB.addTodo(text, $('todo-date').value || null, $('todo-priority').value);
-    inp.value                = '';
-    $('todo-date').value     = '';
-    $('todo-priority').value = 'normal';
+    DB.addTodo(
+      text,
+      $('todo-date').value || null,
+      $('todo-priority').value,
+      '',                           // notes
+      this._selTags.join(','),      // tags
+      this._selColor || null,       // color
+      $('todo-time').value || null  // time
+    );
+    this.resetForm();
     refresh();
     toast('🐾 Tasca afegida!');
   },
 
   setFilter(f, resetDay = true) {
     this.filter = f;
-    document.querySelectorAll('.filter-btn')
-      .forEach(b => b.classList.toggle('active', b.dataset.filter === f));
-    if (resetDay && f !== 'day') {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter===f));
+    if (resetDay && f!=='day') {
       Calendar.selectedDay = null;
       $('quick-add').style.display = 'none';
       $('sel-info').textContent = 'Selecciona un dia per veure o afegir tasques';
@@ -1407,11 +1203,11 @@ const Todos = {
   },
 
   clearCompleted() {
-    const count = DB.getTodos().filter(t => t.completed).length;
+    const count = DB.getTodos().filter(t=>t.completed).length;
     if (!count) { toast('Cap tasca feta per eliminar'); return; }
     DB.clearCompleted();
     refresh();
-    toast(`💛 Eliminades ${count} tasca${count > 1 ? 'ques' : ''}`);
+    toast(`💛 Eliminades ${count} tasca${count>1?'ques':''}`);
   },
 };
 
@@ -1428,25 +1224,18 @@ const Stats = {
 /* ─── PHOTOS ─────────────────────────────────────────────────── */
 const Photos = {
   render() {
-    const grid   = $('photo-grid');
-    const photos = DB.getPhotos();
-    const full   = photos.length >= DB.MAX_PHOTOS;
+    const grid = $('photo-grid'), photos = DB.getPhotos(), full = photos.length>=DB.MAX_PHOTOS;
     grid.innerHTML = '';
-
     photos.forEach(photo => {
       const item = document.createElement('div');
       item.className = 'photo-item';
       item.innerHTML = `<img src="${photo.src}" alt="Klaus" loading="lazy"/>
-        <button class="del-ph" data-id="${photo.id}" title="Eliminar foto">×</button>`;
+        <button class="del-ph" title="Eliminar foto">×</button>`;
       item.querySelector('.del-ph').addEventListener('click', e => {
-        e.stopPropagation();
-        DB.deletePhoto(photo.id);
-        this.render();
-        toast('Foto eliminada');
+        e.stopPropagation(); DB.deletePhoto(photo.id); this.render(); toast('Foto eliminada');
       });
       grid.appendChild(item);
     });
-
     if (!full) {
       const add = document.createElement('div');
       add.className = 'photo-add';
@@ -1454,220 +1243,95 @@ const Photos = {
       add.addEventListener('click', () => $('file-input').click());
       grid.appendChild(add);
     }
-
     $('photos-full').style.display = full ? 'block' : 'none';
   },
-
   handleFiles(files) {
     const canAdd = DB.MAX_PHOTOS - DB.getPhotos().length;
     if (!canAdd) { toast('Has arribat al màxim de 9 fotos'); return; }
     let added = 0;
     files.slice(0, canAdd).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = e => {
-        DB.addPhoto(e.target.result);
-        added++;
-        if (added === Math.min(files.length, canAdd)) {
-          this.render();
-          toast(`📷 ${added} foto${added > 1 ? 'grafies' : 'grafia'} afegida${added > 1 ? 'des' : ''}`);
-        }
+      const r = new FileReader();
+      r.onload = e => {
+        DB.addPhoto(e.target.result); added++;
+        if (added===Math.min(files.length,canAdd)) { this.render(); toast(`📷 ${added} foto${added>1?'grafies':'grafia'} afegida${added>1?'des':''}`); }
       };
-      reader.readAsDataURL(file);
+      r.readAsDataURL(file);
     });
-    $('file-input').value = '';
+    $('file-input').value='';
   },
 };
 
-/* ─── FULL REFRESH ───────────────────────────────────────────── */
-function refresh() {
-  Calendar.render();
-  Todos.render();
-  Stats.render();
-}
+/* ─── REFRESH ────────────────────────────────────────────────── */
+function refresh() { Calendar.render(); Todos.render(); Stats.render(); }
 
 /* ─── EVENT BINDING ──────────────────────────────────────────── */
 function bindEvents() {
   let miIdx = 0;
-
-  // Header logo
-  $('logo').addEventListener('click', () => toast(MISSATGES[miIdx++ % MISSATGES.length]));
-
-  // Calendar navigation
+  $('logo').addEventListener('click', () => toast(MISSATGES[miIdx++%MISSATGES.length]));
   $('prev-month').addEventListener('click', () => Calendar.prevMonth());
   $('next-month').addEventListener('click', () => Calendar.nextMonth());
-
-  // Quick-add from calendar
-  $('qa-btn').addEventListener('click',   () => Calendar.quickAdd());
-  $('qa-input').addEventListener('keydown', e => { if (e.key === 'Enter') Calendar.quickAdd(); });
-
-  // Add todo
+  $('qa-btn').addEventListener('click',     () => Calendar.quickAdd());
+  $('qa-input').addEventListener('keydown', e => { if(e.key==='Enter') Calendar.quickAdd(); });
   $('add-btn').addEventListener('click',    () => Todos.add());
-  $('todo-input').addEventListener('keydown', e => { if (e.key === 'Enter') Todos.add(); });
-
-  // Filters
-  document.querySelectorAll('.filter-btn').forEach(btn =>
-    btn.addEventListener('click', () => Todos.setFilter(btn.dataset.filter))
+  $('todo-input').addEventListener('keydown', e => { if(e.key==='Enter') Todos.add(); });
+  document.querySelectorAll('.filter-btn').forEach(b =>
+    b.addEventListener('click', () => Todos.setFilter(b.dataset.filter))
   );
   $('clear-btn').addEventListener('click', () => Todos.clearCompleted());
+  $('file-input').addEventListener('change', () => Photos.handleFiles(Array.from($('file-input').files)));
 
-  // Photo upload
-  $('file-input').addEventListener('change', () =>
-    Photos.handleFiles(Array.from($('file-input').files))
+  /* Tag toggles in add form */
+  document.querySelectorAll('.tag-toggle').forEach(b =>
+    b.addEventListener('click', () => Todos.toggleAddTag(b.dataset.tag))
+  );
+
+  /* Color dots */
+  document.querySelectorAll('.color-dot').forEach(d =>
+    d.addEventListener('click', () => Todos.selectColor(d.dataset.color))
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   CURSOR PET — Chibi Klaus
-   Self-contained IIFE; no shared state with the rest of the app.
+   CURSOR PET
 ═══════════════════════════════════════════════════════════════ */
 (() => {
-  const el  = $('wdog');
-  const bub = $('dog-bubble');
-  const svg = el.querySelector('svg');
-
-  /* Config */
-  const SPD_WALK = 2.2;
-  const SPD_RUN  = 7.0;
-  const ACCEL    = 0.28;
-  const D_SIT    = 48;
-  const D_RUN    = 120;
-  const IDLE_MS  = 3500;
-
-  const WOOFS  = ['🐾 Bau!', '💛!', '🦴 Woof!', '👋 Hola!', '🐕 Au!', '✨ Grr!'];
-  const SNIFFS = ['👃...', '🐽 sniff'];
-  let woofIdx  = 0;
-
-  /* State */
-  let x = 180, y = window.innerHeight * 0.65;
-  let vx = 0, vy = 0;
-  let facing   = 1;
-  let mode     = 'follow';
-  let dogState = 'sit';
-
-  const mouse       = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-  let mouseLastMove = Date.now();
-  let idleTarget    = null;
-  let bubTimer      = null;
-  let nextAction    = null;
-
-  /* Helpers */
-  function randTarget() {
-    const p = 80;
-    return {
-      x: p + Math.random() * (window.innerWidth  - p * 2),
-      y: p + Math.random() * (window.innerHeight - p * 2),
-    };
-  }
-
-  function setClass(c) {
-    const talking = el.classList.contains('talking');
-    el.className  = c + (talking ? ' talking' : '');
-    dogState = c;
-  }
-
-  function bubble(txt, ms = 1800) {
-    bub.textContent = txt;
-    el.classList.add('talking');
-    clearTimeout(bubTimer);
-    bubTimer = setTimeout(() => el.classList.remove('talking'), ms);
-  }
-
-  function scheduleAction(fn, ms) {
-    clearTimeout(nextAction);
-    nextAction = setTimeout(fn, ms);
-  }
-
-  /* Events */
-  document.addEventListener('mousemove', e => {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-    mouseLastMove = Date.now();
-    if (mode === 'idle') { mode = 'follow'; clearTimeout(nextAction); }
-  });
-
-  document.addEventListener('dblclick', e => {
-    if (e.target.closest('button,input,select,a,.chk,.cal-day')) return;
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-    mouseLastMove = Date.now();
-    bubble(WOOFS[woofIdx++ % WOOFS.length]);
-  });
-
-  /* Main animation loop */
-  function update() {
-    const W   = window.innerWidth;
-    const H   = window.innerHeight;
-    const now = Date.now();
-
-    if (mode === 'follow' && now - mouseLastMove > IDLE_MS) {
-      mode = 'idle';
-      idleTarget = randTarget();
-    }
-
-    let tx, ty;
-    if (mode === 'follow') {
-      tx = mouse.x; ty = mouse.y;
-    } else {
-      if (!idleTarget) idleTarget = randTarget();
-      tx = idleTarget.x; ty = idleTarget.y;
-    }
-
-    const dx = tx - x;
-    const dy = ty - y;
-    const d  = Math.hypot(dx, dy);
-
-    if (d < D_SIT && mode === 'follow') {
-      vx *= 0.78; vy *= 0.78;
-      if (dogState !== 'sit') setClass('sit');
-
-    } else if (d < 8 && mode === 'idle') {
-      vx = 0; vy = 0;
-      setClass('idle');
-      scheduleAction(() => {
-        if (mode !== 'idle') return;
-        if (Math.random() < 0.4) {
-          setClass('sniff');
-          bubble(SNIFFS[Math.floor(Math.random() * SNIFFS.length)], 1200);
-          scheduleAction(() => { idleTarget = randTarget(); }, 1400);
-        } else {
-          idleTarget = randTarget();
-        }
-      }, 800 + Math.random() * 1400);
-
-    } else {
-      const spd = mode === 'follow' && d > D_RUN ? SPD_RUN : SPD_WALK;
-      vx += (dx / d) * spd * ACCEL;
-      vy += (dy / d) * spd * ACCEL;
-      const cur = Math.hypot(vx, vy);
-      if (cur > spd) { vx = (vx / cur) * spd; vy = (vy / cur) * spd; }
-      setClass(cur > 3.5 ? 'run' : 'walk');
-    }
-
-    /* Integrate & clamp to viewport */
-    x += vx; y += vy;
-    const p = 50;
-    if (x < p)      { x = p;      vx =  Math.abs(vx) * 0.4; if (mode === 'idle') idleTarget = randTarget(); }
-    if (x > W - p)  { x = W - p;  vx = -Math.abs(vx) * 0.4; if (mode === 'idle') idleTarget = randTarget(); }
-    if (y < 60)     { y = 60;     vy =  Math.abs(vy) * 0.4; }
-    if (y > H - 10) { y = H - 10; vy = -Math.abs(vy) * 0.4; }
-
-    /* Facing direction */
-    const spd = Math.hypot(vx, vy);
-    if (spd > 0.3 && Math.abs(vx) > 0.2) facing = vx > 0 ? 1 : -1;
-
-    /* Apply transform */
-    el.style.left       = (x - 28) + 'px';
-    el.style.top        = (y - 36) + 'px';
-    svg.style.transform = `scaleX(${facing})`;
-
+  const el=document.getElementById('wdog'), bub=document.getElementById('dog-bubble'), svg=el.querySelector('svg');
+  const SPD_WALK=2.2,SPD_RUN=7.0,ACCEL=.28,D_SIT=48,D_RUN=120,IDLE_MS=3500;
+  const WOOFS=['🐾 Bau!','💛!','🦴 Woof!','👋 Hola!','🐕 Au!','✨ Grr!'];
+  const SNIFFS=['👃...','🐽 sniff'];
+  let woofIdx=0, x=180, y=window.innerHeight*.65, vx=0, vy=0, facing=1, mode='follow', dogState='sit';
+  const mouse={x:window.innerWidth/2,y:window.innerHeight/2};
+  let mouseLastMove=Date.now(),idleTarget=null,bubTimer=null,nextAction=null;
+  const randTarget=()=>({x:80+Math.random()*(window.innerWidth-160),y:80+Math.random()*(window.innerHeight-160)});
+  function setClass(c){const t=el.classList.contains('talking');el.className=c+(t?' talking':'');dogState=c;}
+  function bubble(txt,ms=1800){bub.textContent=txt;el.classList.add('talking');clearTimeout(bubTimer);bubTimer=setTimeout(()=>el.classList.remove('talking'),ms);}
+  function scheduleAction(fn,ms){clearTimeout(nextAction);nextAction=setTimeout(fn,ms);}
+  document.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY;mouseLastMove=Date.now();if(mode==='idle'){mode='follow';clearTimeout(nextAction);}});
+  document.addEventListener('dblclick',e=>{if(e.target.closest('button,input,select,a,.chk,.cal-day'))return;mouse.x=e.clientX;mouse.y=e.clientY;mouseLastMove=Date.now();bubble(WOOFS[woofIdx++%WOOFS.length]);});
+  function update(){
+    const W=window.innerWidth,H=window.innerHeight,now=Date.now();
+    if(mode==='follow'&&now-mouseLastMove>IDLE_MS){mode='idle';idleTarget=randTarget();}
+    let tx,ty;
+    if(mode==='follow'){tx=mouse.x;ty=mouse.y;}else{if(!idleTarget)idleTarget=randTarget();tx=idleTarget.x;ty=idleTarget.y;}
+    const dx=tx-x,dy=ty-y,d=Math.hypot(dx,dy);
+    if(d<D_SIT&&mode==='follow'){vx*=.78;vy*=.78;if(dogState!=='sit')setClass('sit');}
+    else if(d<8&&mode==='idle'){vx=0;vy=0;setClass('idle');scheduleAction(()=>{if(mode!=='idle')return;if(Math.random()<.4){setClass('sniff');bubble(SNIFFS[Math.floor(Math.random()*SNIFFS.length)],1200);scheduleAction(()=>{idleTarget=randTarget();},1400);}else{idleTarget=randTarget();}},800+Math.random()*1400);}
+    else{const spd=mode==='follow'&&d>D_RUN?SPD_RUN:SPD_WALK;vx+=(dx/d)*spd*ACCEL;vy+=(dy/d)*spd*ACCEL;const cur=Math.hypot(vx,vy);if(cur>spd){vx=(vx/cur)*spd;vy=(vy/cur)*spd;}setClass(cur>3.5?'run':'walk');}
+    x+=vx;y+=vy;
+    const p=50;
+    if(x<p){x=p;vx=Math.abs(vx)*.4;if(mode==='idle')idleTarget=randTarget();}
+    if(x>W-p){x=W-p;vx=-Math.abs(vx)*.4;if(mode==='idle')idleTarget=randTarget();}
+    if(y<60){y=60;vy=Math.abs(vy)*.4;}
+    if(y>H-10){y=H-10;vy=-Math.abs(vy)*.4;}
+    const spd=Math.hypot(vx,vy);if(spd>.3&&Math.abs(vx)>.2)facing=vx>0?1:-1;
+    el.style.left=(x-28)+'px';el.style.top=(y-36)+'px';svg.style.transform=`scaleX(${facing})`;
     requestAnimationFrame(update);
   }
-
   update();
 })();
 
 /* ═══════════════════════════════════════════════════════════════
-   APP INIT  —  wait for SQLite WASM, then start everything
+   INIT
 ═══════════════════════════════════════════════════════════════ */
 DB.init()
   .then(() => {
@@ -1675,20 +1339,19 @@ DB.init()
     renderHeaderDate();
     Photos.render();
     bindEvents();
+    Todos.renderTagFilterRow();
     refresh();
   })
   .catch(err => {
     const ov = $('db-loading');
-    ov.innerHTML = `
-      <svg width="48" height="48" viewBox="0 0 100 100" fill="#C8922A" style="margin-bottom:1rem">
-        <ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/>
-        <ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/>
-        <ellipse cx="81" cy="43" rx="12" ry="14"/>
-      </svg>
+    ov.innerHTML = `<svg width="48" height="48" viewBox="0 0 100 100" fill="#C8922A" style="margin-bottom:1rem">
+      <ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/>
+      <ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/>
+      <ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
       <p style="color:#B83828;font-size:.9rem;letter-spacing:1px;text-align:center">
         Error carregant SQLite.<br>Comprova la connexió a internet i refresca.
       </p>`;
-    console.error('DB init error:', err);
+    console.error('DB init:', err);
   });
 </script>
 </body>
