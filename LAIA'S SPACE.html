@@ -194,22 +194,22 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:           #FFF8F0;
-      --bg2:          #F5EDE0;
-      --card:         rgba(255, 252, 246, 0.96);
-      --card2:        rgba(250, 244, 234, 0.98);
+      --bg:           #F2F5F8;
+      --bg2:          #E6EBF0;
+      --card:         rgba(247, 250, 253, 0.96);
+      --card2:        rgba(242, 246, 250, 0.98);
       --amber:        #C8922A;
-      --amber-lt:     #9A6C14;
-      --amber-dim:    #7A5010;
-      --cream:        #2C1A08;
-      --cream-muted:  #7A5830;
-      --slate:        #5A6E80;
+      --amber-lt:     #8A6010;
+      --amber-dim:    #6A4808;
+      --cream:        #1A2530;
+      --cream-muted:  #4E6278;
+      --slate:        #6E8090;
       --red:          #B83828;
       --green:        #3E7230;
-      --border:       rgba(200,146,42,.18);
-      --border-h:     rgba(200,146,42,.48);
-      --glow:         0 4px 20px rgba(200,146,42,.13);
-      --glow-strong:  0 6px 36px rgba(200,146,42,.24);
+      --border:       rgba(110,128,144,.22);
+      --border-h:     rgba(200,146,42,.52);
+      --glow:         0 4px 20px rgba(110,128,144,.14);
+      --glow-strong:  0 6px 36px rgba(200,146,42,.22);
     }
 
     html { scroll-behavior: smooth; }
@@ -259,7 +259,7 @@
     header {
       position: relative; z-index: 10;
       min-height: 240px;
-      background: linear-gradient(155deg, #EEE2C6 0%, #E8D49C 45%, #EDE0B8 100%);
+      background: linear-gradient(155deg, #CDD6E0 0%, #C8D4DF 45%, #D0DAE6 100%);
       overflow: hidden;
       display: flex; align-items: stretch;
     }
@@ -330,8 +330,8 @@
     .header-vignette {
       position: absolute; inset: 0; z-index: 2;
       background:
-        radial-gradient(ellipse 55% 90% at 35% 55%, rgba(220,180,80,.10), transparent),
-        linear-gradient(100deg, rgba(240,220,160,.35) 0%, rgba(255,248,230,.0) 48%, rgba(220,185,100,.22) 100%);
+        radial-gradient(ellipse 55% 90% at 35% 55%, rgba(110,128,144,.12), transparent),
+        linear-gradient(100deg, rgba(180,200,220,.3) 0%, rgba(200,215,230,.0) 48%, rgba(160,190,215,.18) 100%);
     }
 
     /* Ambient amber glow lines */
@@ -352,14 +352,14 @@
 
     .header-logo {
       width: 108px; height: 108px; flex-shrink: 0;
-      filter: drop-shadow(0 4px 16px rgba(160,100,10,.35));
+      filter: drop-shadow(0 4px 16px rgba(90,110,130,.4));
       animation: masterFloat 5s ease-in-out infinite;
       cursor: pointer;
       transition: filter 0.3s;
     }
 
     .header-logo:hover {
-      filter: drop-shadow(0 6px 22px rgba(160,100,10,.55));
+      filter: drop-shadow(0 6px 22px rgba(90,110,130,.6));
       animation-play-state: paused;
     }
 
@@ -373,7 +373,7 @@
       color: var(--amber-lt);
       letter-spacing: 5px; text-transform: uppercase;
       line-height: 1;
-      text-shadow: 0 0 30px rgba(180,120,20,.3), 0 1px 0 rgba(0,0,0,.12);
+      text-shadow: 0 0 28px rgba(200,146,42,.35), 0 1px 0 rgba(0,0,0,.08);
     }
 
     .header-text .sub {
@@ -582,7 +582,7 @@
     }
 
     .opt:focus { border-color:var(--amber); }
-    option { background:#FFF8F0; color:var(--cream); }
+    option { background:#F2F5F8; color:var(--cream); }
 
     .add-btn {
       padding:.88rem 1.8rem;
@@ -887,15 +887,15 @@
   -->
   <div class="blob blob-1">
     <img src="k1.jpg" alt=""
-      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(145deg,#C8D8E0,#E0C890)'"/>
+      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(145deg,#8AAABE,#C8D4E0)'"/>
   </div>
   <div class="blob blob-2">
     <img src="k2.jpg" alt=""
-      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(160deg,#B8CC98,#D8C470)'"/>
+      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(160deg,#7A9AAE,#A8C0D0)'"/>
   </div>
   <div class="blob blob-3">
     <img src="k3.jpg" alt=""
-      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(140deg,#D4B898,#B8C8D4)'"/>
+      onerror="this.style.display='none';this.parentElement.style.background='linear-gradient(140deg,#90A8BC,#B8CAD8)'"/>
   </div>
 
   <div class="header-glow"></div>
