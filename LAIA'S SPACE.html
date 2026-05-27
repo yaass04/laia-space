@@ -59,6 +59,16 @@
       try { _db.run("ALTER TABLE todos ADD COLUMN color TEXT");            } catch {}
       try { _db.run("ALTER TABLE todos ADD COLUMN time  TEXT");            } catch {}
 
+      /* Fase 2 — Llistes */
+      _db.run(`CREATE TABLE IF NOT EXISTS lists (
+        id        TEXT PRIMARY KEY,
+        name      TEXT NOT NULL,
+        emoji     TEXT NOT NULL DEFAULT '📋',
+        color     TEXT NOT NULL DEFAULT '#C8922A',
+        createdAt TEXT NOT NULL
+      );`);
+      try { _db.run("ALTER TABLE todos ADD COLUMN list_id TEXT"); } catch {}
+
       if (!saved) this._migrate();
       this._save();
     },
@@ -113,15 +123,15 @@
                  .map(t => ({ ...t, completed: !!t.completed }));
     },
 
-    addTodo(text, date = null, priority = 'normal', notes = '', tags = '', color = null, time = null) {
+    addTodo(text, date = null, priority = 'normal', notes = '', tags = '', color = null, time = null, list_id = null) {
       const id        = Date.now().toString(36) + Math.random().toString(36).slice(2);
       const createdAt = new Date().toISOString();
       _db.run(
-        'INSERT INTO todos (id,text,completed,date,priority,createdAt,completedAt,notes,tags,color,time) VALUES (?,?,0,?,?,?,NULL,?,?,?,?)',
-        [id, text, date, priority, createdAt, notes, tags, color, time]
+        'INSERT INTO todos (id,text,completed,date,priority,createdAt,completedAt,notes,tags,color,time,list_id) VALUES (?,?,0,?,?,?,NULL,?,?,?,?,?)',
+        [id, text, date, priority, createdAt, notes, tags, color, time, list_id]
       );
       this._save();
-      return { id, text, completed: false, date, priority, createdAt, completedAt: null, notes, tags, color, time };
+      return { id, text, completed: false, date, priority, createdAt, completedAt: null, notes, tags, color, time, list_id };
     },
 
     toggleTodo(id) {
@@ -144,9 +154,9 @@
       if (!todo) return null;
       const m = { ...todo, ...updates };
       _db.run(
-        'UPDATE todos SET text=?,completed=?,date=?,priority=?,completedAt=?,notes=?,tags=?,color=?,time=? WHERE id=?',
+        'UPDATE todos SET text=?,completed=?,date=?,priority=?,completedAt=?,notes=?,tags=?,color=?,time=?,list_id=? WHERE id=?',
         [m.text, m.completed ? 1 : 0, m.date, m.priority, m.completedAt,
-         m.notes || '', m.tags || '', m.color || null, m.time || null, id]
+         m.notes || '', m.tags || '', m.color || null, m.time || null, m.list_id || null, id]
       );
       this._save();
       return m;
@@ -188,6 +198,27 @@
     },
     deletePhoto(id) {
       _db.run('DELETE FROM photos WHERE id=?', [id]);
+      this._save();
+    },
+
+    /* ── Lists ───────────────────────────────────────────────── */
+    getLists() {
+      return this._rows('SELECT * FROM lists ORDER BY createdAt ASC');
+    },
+    addList(name, emoji = '📋', color = '#C8922A') {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const createdAt = new Date().toISOString();
+      _db.run('INSERT INTO lists VALUES (?,?,?,?,?)', [id, name, emoji, color, createdAt]);
+      this._save();
+      return { id, name, emoji, color, createdAt };
+    },
+    deleteList(id) {
+      _db.run('UPDATE todos SET list_id=NULL WHERE list_id=?', [id]);
+      _db.run('DELETE FROM lists WHERE id=?', [id]);
+      this._save();
+    },
+    updateList(id, name, emoji, color) {
+      _db.run('UPDATE lists SET name=?,emoji=?,color=? WHERE id=?', [name, emoji, color, id]);
       this._save();
     },
   };
@@ -521,6 +552,86 @@
   .note-area:focus { border-color:var(--amber); background:rgba(200,146,42,.07); }
   .note-area::placeholder { color:var(--cream-muted); }
 
+  /* ── Lists card ─────────────────────────────────────────── */
+  .list-all-btn {
+    width:100%; padding:.42rem .85rem; margin-bottom:.5rem;
+    background:transparent; border:1.5px solid rgba(200,146,42,.18);
+    border-radius:12px; color:var(--cream-muted); font-size:.78rem;
+    font-weight:700; cursor:pointer; font-family:inherit; text-align:left;
+    display:flex; align-items:center; gap:.5rem; transition:all .18s;
+  }
+  .list-all-btn.active,
+  .list-all-btn:hover { background:rgba(200,146,42,.12); border-color:var(--amber); color:var(--amber-lt); }
+
+  .list-item {
+    display:flex; align-items:center; gap:.55rem;
+    padding:.44rem .7rem; border-radius:12px; cursor:pointer;
+    border:1.5px solid transparent; transition:all .18s; margin-bottom:3px;
+    position:relative;
+  }
+  .list-item:hover { background:rgba(200,146,42,.07); border-color:var(--border); }
+  .list-item.active { border-color:currentColor; }
+  .list-item-emoji { font-size:1rem; flex-shrink:0; line-height:1; }
+  .list-item-name { flex:1; font-size:.8rem; font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .list-count { font-size:.65rem; font-weight:800; padding:1px 7px; border-radius:20px; background:rgba(200,146,42,.12); color:var(--amber-lt); flex-shrink:0; }
+  .list-del-btn {
+    width:20px; height:20px; border:none; background:none; cursor:pointer;
+    border-radius:6px; color:rgba(200,80,64,.3); font-size:.9rem;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; transition:all .15s; opacity:0; line-height:1;
+  }
+  .list-item:hover .list-del-btn { opacity:1; }
+  .list-del-btn:hover { background:rgba(200,80,64,.14); color:var(--red); }
+
+  /* Create list form */
+  .list-create-row { margin-top:.6rem; }
+  .list-new-btn {
+    width:100%; padding:.38rem .7rem; background:transparent;
+    border:1.5px dashed rgba(200,146,42,.25); border-radius:12px;
+    color:rgba(200,146,42,.55); font-size:.75rem; font-weight:700;
+    cursor:pointer; font-family:inherit; transition:all .18s; text-align:center;
+  }
+  .list-new-btn:hover { border-color:var(--amber); color:var(--amber-lt); background:rgba(200,146,42,.07); }
+  .list-create-form { display:none; padding:.65rem; background:rgba(200,146,42,.05); border-radius:14px; border:1px solid var(--border); margin-top:.4rem; }
+  .list-create-form.open { display:block; }
+  .list-emoji-row { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:.5rem; }
+  .list-emoji-opt {
+    width:28px; height:28px; border-radius:8px; border:1.5px solid transparent;
+    cursor:pointer; background:transparent; font-size:.9rem; display:flex;
+    align-items:center; justify-content:center; transition:all .15s; padding:0;
+    font-family:inherit;
+  }
+  .list-emoji-opt:hover { background:rgba(200,146,42,.14); }
+  .list-emoji-opt.sel { border-color:var(--amber); background:rgba(200,146,42,.18); }
+  .list-color-row { display:flex; gap:5px; align-items:center; margin-bottom:.5rem; }
+  .list-name-input {
+    width:100%; padding:.48rem .75rem; margin-bottom:.5rem;
+    background:rgba(200,146,42,.06); border:1.5px solid var(--border);
+    border-radius:10px; font-size:.82rem; color:var(--cream);
+    font-family:inherit; outline:none; transition:border-color .2s;
+  }
+  .list-name-input:focus { border-color:var(--amber); }
+  .list-name-input::placeholder { color:var(--cream-muted); }
+  .list-form-btns { display:flex; gap:.4rem; }
+  .list-save-btn {
+    flex:1; padding:.42rem; background:var(--amber); color:var(--bg);
+    border:none; border-radius:10px; font-size:.78rem; font-weight:800;
+    cursor:pointer; font-family:inherit; transition:all .2s;
+  }
+  .list-save-btn:hover { background:var(--amber-lt); }
+  .list-cancel-btn {
+    padding:.42rem .8rem; background:transparent; border:1.5px solid var(--border);
+    border-radius:10px; font-size:.78rem; color:var(--cream-muted);
+    cursor:pointer; font-family:inherit; transition:all .2s;
+  }
+  .list-cancel-btn:hover { border-color:var(--cream-muted); }
+
+  /* List badge on todo items */
+  .badge-list {
+    font-size:.62rem; padding:2px 8px; border-radius:20px; font-weight:700;
+    white-space:nowrap; display:inline-flex; align-items:center; gap:3px;
+  }
+
   /* ── Empty state ─────────────────────────────────────────── */
   .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:3rem 1rem; gap:.75rem; }
   .empty-state p { font-size:.85rem; color:var(--cream-muted); }
@@ -703,6 +814,51 @@
       </div>
     </div>
 
+    <!-- Llistes -->
+    <div class="card">
+      <div class="card-title">
+        <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
+        Llistes
+      </div>
+      <div id="lists-container"></div>
+      <div class="list-create-row">
+        <button class="list-new-btn" id="list-new-btn">+ Nova llista</button>
+        <div class="list-create-form" id="list-create-form">
+          <div class="list-emoji-row" id="list-emoji-row">
+            <button class="list-emoji-opt sel" data-emoji="📋">📋</button>
+            <button class="list-emoji-opt" data-emoji="📝">📝</button>
+            <button class="list-emoji-opt" data-emoji="🏠">🏠</button>
+            <button class="list-emoji-opt" data-emoji="💼">💼</button>
+            <button class="list-emoji-opt" data-emoji="🎯">🎯</button>
+            <button class="list-emoji-opt" data-emoji="🏃">🏃</button>
+            <button class="list-emoji-opt" data-emoji="🎨">🎨</button>
+            <button class="list-emoji-opt" data-emoji="🌟">🌟</button>
+            <button class="list-emoji-opt" data-emoji="❤️">❤️</button>
+            <button class="list-emoji-opt" data-emoji="🐾">🐾</button>
+            <button class="list-emoji-opt" data-emoji="🛒">🛒</button>
+            <button class="list-emoji-opt" data-emoji="🎮">🎮</button>
+            <button class="list-emoji-opt" data-emoji="📚">📚</button>
+            <button class="list-emoji-opt" data-emoji="💪">💪</button>
+            <button class="list-emoji-opt" data-emoji="🌿">🌿</button>
+          </div>
+          <div class="list-color-row" id="list-color-row">
+            <div class="color-dot sel" data-color="#C8922A" style="background:#C8922A"></div>
+            <div class="color-dot" data-color="#4A7EC0" style="background:#4A7EC0"></div>
+            <div class="color-dot" data-color="#9060C0" style="background:#9060C0"></div>
+            <div class="color-dot" data-color="#50A060" style="background:#50A060"></div>
+            <div class="color-dot" data-color="#C04060" style="background:#C04060"></div>
+            <div class="color-dot" data-color="#C07830" style="background:#C07830"></div>
+            <div class="color-dot" data-color="#6E8090" style="background:#6E8090"></div>
+          </div>
+          <input type="text" class="list-name-input" id="list-name-input" placeholder="Nom de la llista…" maxlength="32" />
+          <div class="list-form-btns">
+            <button class="list-save-btn" id="list-save-btn">Crear llista</button>
+            <button class="list-cancel-btn" id="list-cancel-btn">Cancel·lar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Fotos -->
     <div class="card">
       <div class="card-title">
@@ -738,6 +894,9 @@
 
       <!-- Fila 3: data, hora, prioritat, colors, botó -->
       <div class="add-opts-row">
+        <select class="opt" id="todo-list">
+          <option value="">📋 Cap llista</option>
+        </select>
         <input type="date" class="opt" id="todo-date" />
         <input type="time" class="opt" id="todo-time" />
         <select class="opt" id="todo-priority">
@@ -957,10 +1116,11 @@ const Todos = {
     $('todo-date').value     = '';
     $('todo-time').value     = '';
     $('todo-priority').value = 'normal';
+    $('todo-list').value     = '';
     this._selTags  = [];
     this._selColor = '';
     document.querySelectorAll('.tag-toggle').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.color-dot').forEach(d => d.classList.toggle('sel', d.dataset.color===''));
+    document.querySelectorAll('#color-picker .color-dot').forEach(d => d.classList.toggle('sel', d.dataset.color===''));
   },
 
   /* ── Tag filter row ─────────────────────────────────────── */
@@ -1026,6 +1186,11 @@ const Todos = {
       todos = todos.filter(t => t.tags && t.tags.split(',').includes(this.activeTag));
     }
 
+    /* List filter */
+    if (Lists.active !== null) {
+      todos = todos.filter(t => t.list_id === Lists.active);
+    }
+
     list.innerHTML = '';
 
     if (todos.length === 0) {
@@ -1081,6 +1246,16 @@ const Todos = {
       const meta = document.createElement('div');
       meta.className = 'todo-meta';
 
+      if (todo.list_id) {
+        const lst = DB.getLists().find(l => l.id === todo.list_id);
+        if (lst) {
+          const b = document.createElement('span');
+          b.className   = 'badge-list';
+          b.style.cssText = `background:${lst.color}1a;color:${lst.color};`;
+          b.textContent = `${lst.emoji} ${lst.name}`;
+          meta.appendChild(b);
+        }
+      }
       if (todo.tags) {
         todo.tags.split(',').filter(Boolean).forEach(key => {
           const t = TAGS[key]; if (!t) return;
@@ -1183,7 +1358,8 @@ const Todos = {
       '',                           // notes
       this._selTags.join(','),      // tags
       this._selColor || null,       // color
-      $('todo-time').value || null  // time
+      $('todo-time').value || null, // time
+      $('todo-list').value || null  // list_id
     );
     this.resetForm();
     refresh();
@@ -1218,6 +1394,125 @@ const Stats = {
     $('s-total').textContent   = s.total;
     $('s-pending').textContent = s.pending;
     $('s-done').textContent    = s.completed;
+  },
+};
+
+/* ─── LISTS ──────────────────────────────────────────────────── */
+const Lists = {
+  active    : null,   // active list_id filter (null = all)
+  _selEmoji : '📋',
+  _selColor : '#C8922A',
+  _formOpen : false,
+
+  render() {
+    const container = $('lists-container');
+    const lists     = DB.getLists();
+    const todos     = DB.getTodos();
+    container.innerHTML = '';
+
+    /* "Totes" button */
+    const allBtn = document.createElement('button');
+    allBtn.className   = 'list-all-btn' + (this.active===null ? ' active' : '');
+    allBtn.innerHTML   = '📋 <span>Totes les tasques</span>';
+    allBtn.addEventListener('click', () => { this.select(null); });
+    container.appendChild(allBtn);
+
+    /* List items */
+    lists.forEach(list => {
+      const count = todos.filter(t => t.list_id === list.id && !t.completed).length;
+      const item  = document.createElement('div');
+      item.className = 'list-item' + (this.active===list.id ? ' active' : '');
+      item.style.color = list.color;
+
+      item.innerHTML = `
+        <span class="list-item-emoji">${list.emoji}</span>
+        <span class="list-item-name">${this._esc(list.name)}</span>
+        <span class="list-count">${count}</span>
+        <button class="list-del-btn" title="Eliminar llista">×</button>
+      `;
+      item.querySelector('.list-del-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        if (this.active === list.id) this.select(null);
+        DB.deleteList(list.id);
+        this.render();
+        this._populateSelect();
+        refresh();
+        toast(`🗑 "${list.name}" eliminada`);
+      });
+      item.addEventListener('click', () => this.select(list.id));
+      container.appendChild(item);
+    });
+  },
+
+  select(id) {
+    this.active = id;
+    this.render();
+    Todos.render();
+  },
+
+  _esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  },
+
+  openForm() {
+    this._formOpen = true;
+    this._selEmoji = '📋';
+    this._selColor = '#C8922A';
+    $('list-name-input').value = '';
+    $('list-create-form').classList.add('open');
+    /* reset emoji */
+    document.querySelectorAll('.list-emoji-opt').forEach(b =>
+      b.classList.toggle('sel', b.dataset.emoji === '📋')
+    );
+    /* reset color */
+    document.querySelectorAll('#list-color-row .color-dot').forEach(d =>
+      d.classList.toggle('sel', d.dataset.color === '#C8922A')
+    );
+    $('list-name-input').focus();
+  },
+
+  closeForm() {
+    this._formOpen = false;
+    $('list-create-form').classList.remove('open');
+  },
+
+  selectEmoji(emoji) {
+    this._selEmoji = emoji;
+    document.querySelectorAll('.list-emoji-opt').forEach(b =>
+      b.classList.toggle('sel', b.dataset.emoji === emoji)
+    );
+  },
+
+  selectColor(color) {
+    this._selColor = color;
+    document.querySelectorAll('#list-color-row .color-dot').forEach(d =>
+      d.classList.toggle('sel', d.dataset.color === color)
+    );
+  },
+
+  save() {
+    const name = $('list-name-input').value.trim();
+    if (!name) { $('list-name-input').focus(); return; }
+    DB.addList(name, this._selEmoji, this._selColor);
+    this.closeForm();
+    this.render();
+    this._populateSelect();
+    toast(`📋 "${name}" creada!`);
+  },
+
+  _populateSelect() {
+    const sel   = $('todo-list');
+    const curVal = sel.value;
+    const lists  = DB.getLists();
+    sel.innerHTML = '<option value="">📋 Cap llista</option>';
+    lists.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value       = l.id;
+      opt.textContent = `${l.emoji} ${l.name}`;
+      sel.appendChild(opt);
+    });
+    /* Restore previous selection if still valid */
+    if (curVal && lists.find(l => l.id === curVal)) sel.value = curVal;
   },
 };
 
@@ -1262,7 +1557,7 @@ const Photos = {
 };
 
 /* ─── REFRESH ────────────────────────────────────────────────── */
-function refresh() { Calendar.render(); Todos.render(); Stats.render(); }
+function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); }
 
 /* ─── EVENT BINDING ──────────────────────────────────────────── */
 function bindEvents() {
@@ -1285,9 +1580,21 @@ function bindEvents() {
     b.addEventListener('click', () => Todos.toggleAddTag(b.dataset.tag))
   );
 
-  /* Color dots */
-  document.querySelectorAll('.color-dot').forEach(d =>
+  /* Color dots (task add form only) */
+  document.querySelectorAll('#color-picker .color-dot').forEach(d =>
     d.addEventListener('click', () => Todos.selectColor(d.dataset.color))
+  );
+
+  /* Lists */
+  $('list-new-btn').addEventListener('click', () => Lists.openForm());
+  $('list-cancel-btn').addEventListener('click', () => Lists.closeForm());
+  $('list-save-btn').addEventListener('click', () => Lists.save());
+  $('list-name-input').addEventListener('keydown', e => { if (e.key==='Enter') Lists.save(); });
+  document.querySelectorAll('.list-emoji-opt').forEach(b =>
+    b.addEventListener('click', () => Lists.selectEmoji(b.dataset.emoji))
+  );
+  document.querySelectorAll('#list-color-row .color-dot').forEach(d =>
+    d.addEventListener('click', () => Lists.selectColor(d.dataset.color))
   );
 }
 
@@ -1340,6 +1647,7 @@ DB.init()
     Photos.render();
     bindEvents();
     Todos.renderTagFilterRow();
+    Lists._populateSelect();
     refresh();
   })
   .catch(err => {
