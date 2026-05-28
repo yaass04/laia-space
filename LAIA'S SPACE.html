@@ -69,6 +69,19 @@
       );`);
       try { _db.run("ALTER TABLE todos ADD COLUMN list_id TEXT"); } catch {}
 
+      /* Fase 1 v2 — Estats, assignació, usuaris */
+      _db.run(`CREATE TABLE IF NOT EXISTS users (
+        id        TEXT PRIMARY KEY,
+        name      TEXT NOT NULL,
+        initials  TEXT NOT NULL,
+        color     TEXT NOT NULL DEFAULT '#E8A030',
+        createdAt TEXT NOT NULL
+      );`);
+      try { _db.run("ALTER TABLE todos ADD COLUMN state    TEXT NOT NULL DEFAULT 'todo'"); } catch {}
+      try { _db.run("ALTER TABLE todos ADD COLUMN assignee TEXT");                          } catch {}
+      /* Migrar completed → state */
+      try { _db.run("UPDATE todos SET state='done' WHERE completed=1 AND (state IS NULL OR state='todo')"); } catch {}
+
       if (!saved) this._migrate();
       this._save();
     },
@@ -120,28 +133,42 @@
     /* ── Todos ────────────────────────────────────────────── */
     getTodos() {
       return this._rows('SELECT * FROM todos ORDER BY createdAt DESC')
-                 .map(t => ({ ...t, completed: !!t.completed }));
+                 .map(t => ({
+                   ...t,
+                   state    : t.state     || (t.completed ? 'done' : 'todo'),
+                   completed: t.state === 'done' || !!t.completed,
+                 }));
     },
 
-    addTodo(text, date = null, priority = 'normal', notes = '', tags = '', color = null, time = null, list_id = null) {
+    addTodo(text, date = null, priority = 'normal', notes = '', tags = '', color = null, time = null, list_id = null, state = 'todo', assignee = null) {
       const id        = Date.now().toString(36) + Math.random().toString(36).slice(2);
       const createdAt = new Date().toISOString();
+      const completed = state === 'done' ? 1 : 0;
+      const completedAt = completed ? createdAt : null;
       _db.run(
-        'INSERT INTO todos (id,text,completed,date,priority,createdAt,completedAt,notes,tags,color,time,list_id) VALUES (?,?,0,?,?,?,NULL,?,?,?,?,?)',
-        [id, text, date, priority, createdAt, notes, tags, color, time, list_id]
+        'INSERT INTO todos (id,text,completed,date,priority,createdAt,completedAt,notes,tags,color,time,list_id,state,assignee) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [id, text, completed, date, priority, createdAt, completedAt, notes, tags, color, time, list_id, state, assignee]
       );
       this._save();
-      return { id, text, completed: false, date, priority, createdAt, completedAt: null, notes, tags, color, time, list_id };
+      return { id, text, completed: !!completed, date, priority, createdAt, completedAt, notes, tags, color, time, list_id, state, assignee };
     },
 
     toggleTodo(id) {
       const todo = this.getTodos().find(t => t.id === id);
       if (!todo) return null;
-      const completed   = todo.completed ? 0 : 1;
+      const newState    = todo.state === 'done' ? 'todo' : 'done';
+      const completed   = newState === 'done' ? 1 : 0;
       const completedAt = completed ? new Date().toISOString() : null;
-      _db.run('UPDATE todos SET completed=?,completedAt=? WHERE id=?', [completed, completedAt, id]);
+      _db.run('UPDATE todos SET state=?,completed=?,completedAt=? WHERE id=?', [newState, completed, completedAt, id]);
       this._save();
-      return { ...todo, completed: !!completed, completedAt };
+      return { ...todo, state: newState, completed: !!completed, completedAt };
+    },
+
+    setState(id, state) {
+      const completed   = state === 'done' ? 1 : 0;
+      const completedAt = completed ? new Date().toISOString() : null;
+      _db.run('UPDATE todos SET state=?,completed=?,completedAt=? WHERE id=?', [state, completed, completedAt, id]);
+      this._save();
     },
 
     deleteTodo(id) {
@@ -153,10 +180,15 @@
       const todo = this.getTodos().find(t => t.id === id);
       if (!todo) return null;
       const m = { ...todo, ...updates };
+      if ('state' in updates) {
+        m.completed   = m.state === 'done' ? 1 : 0;
+        m.completedAt = m.completed ? (m.completedAt || new Date().toISOString()) : null;
+      }
       _db.run(
-        'UPDATE todos SET text=?,completed=?,date=?,priority=?,completedAt=?,notes=?,tags=?,color=?,time=?,list_id=? WHERE id=?',
+        'UPDATE todos SET text=?,completed=?,date=?,priority=?,completedAt=?,notes=?,tags=?,color=?,time=?,list_id=?,state=?,assignee=? WHERE id=?',
         [m.text, m.completed ? 1 : 0, m.date, m.priority, m.completedAt,
-         m.notes || '', m.tags || '', m.color || null, m.time || null, m.list_id || null, id]
+         m.notes || '', m.tags || '', m.color || null, m.time || null,
+         m.list_id || null, m.state || 'todo', m.assignee || null, id]
       );
       this._save();
       return m;
@@ -164,24 +196,44 @@
 
     getTodosByDate(dateStr) {
       return this._rows('SELECT * FROM todos WHERE date=? ORDER BY createdAt DESC', [dateStr])
-                 .map(t => ({ ...t, completed: !!t.completed }));
+                 .map(t => ({ ...t, state: t.state || (t.completed ? 'done' : 'todo'), completed: t.state === 'done' || !!t.completed }));
     },
 
     clearCompleted() {
-      _db.run('DELETE FROM todos WHERE completed=1');
+      _db.run("DELETE FROM todos WHERE state='done' OR completed=1");
       this._save();
     },
 
     getStats() {
       const todos = this.getTodos();
       const today = new Date().toISOString().split('T')[0];
+      const overdue = todos.filter(t => t.date && t.date < today && t.state !== 'done').length;
       return {
-        total    : todos.length,
-        completed: todos.filter(t =>  t.completed).length,
-        pending  : todos.filter(t => !t.completed).length,
-        high     : todos.filter(t =>  t.priority === 'high' && !t.completed).length,
-        today    : todos.filter(t =>  t.date === today).length,
+        total      : todos.length,
+        completed  : todos.filter(t => t.state === 'done').length,
+        pending    : todos.filter(t => t.state !== 'done').length,
+        inprogress : todos.filter(t => t.state === 'inprogress').length,
+        overdue,
+        today      : todos.filter(t => t.date === today).length,
       };
+    },
+
+    /* ── Users ───────────────────────────────────────────────── */
+    getUsers() {
+      return this._rows('SELECT * FROM users ORDER BY createdAt ASC');
+    },
+    addUser(name, color = '#E8A030') {
+      const id       = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const initials = name.trim().split(/\s+/).map(w => w[0].toUpperCase()).slice(0,2).join('');
+      const createdAt = new Date().toISOString();
+      _db.run('INSERT INTO users VALUES (?,?,?,?,?)', [id, name, initials, color, createdAt]);
+      this._save();
+      return { id, name, initials, color, createdAt };
+    },
+    deleteUser(id) {
+      _db.run('UPDATE todos SET assignee=NULL WHERE assignee=?', [id]);
+      _db.run('DELETE FROM users WHERE id=?', [id]);
+      this._save();
     },
 
     /* ── Photos ───────────────────────────────────────────── */
@@ -383,7 +435,7 @@
   .quick-add button:hover { background: #F0B840; transform: scale(1.05); }
 
   /* ── Stats ───────────────────────────────────────────────── */
-  .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: .7rem; }
+  .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: .6rem; }
   .stat { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 16px; padding: 1.1rem .5rem; text-align: center; transition: all .22s; position: relative; overflow: hidden; }
   .stat::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(232,160,48,0.06), transparent); }
   .stat:hover { background: rgba(232,160,48,0.07); transform: translateY(-3px); border-color: rgba(232,160,48,0.2); box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
@@ -596,6 +648,147 @@
     filter:invert(1) brightness(.52) sepia(1) hue-rotate(12deg);
   }
 
+  /* ══ PHASE 1 v2 — State / Priority / Overdue / Sort / Users ═ */
+
+  /* State badge on items */
+  .state-badge {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:3px 9px; border-radius:20px; font-size:.6rem; font-weight:800;
+    white-space:nowrap; cursor:pointer; border:1px solid; transition:all .15s;
+    user-select:none; letter-spacing:.3px;
+  }
+  .state-badge:hover { filter:brightness(1.15); transform:scale(1.04); }
+  .state-badge .s-icon { font-size:.75rem; line-height:1; }
+
+  /* State dropdown popup */
+  .state-menu {
+    position:absolute; z-index:200; top:calc(100% + 4px); left:0;
+    background:rgba(12,16,32,0.97); backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,0.1); border-radius:12px;
+    padding:4px; box-shadow:0 12px 40px rgba(0,0,0,0.7);
+    min-width:140px; display:none;
+  }
+  .state-menu.open { display:block; animation:fadeDetail .14s ease; }
+  .state-opt {
+    display:flex; align-items:center; gap:8px; padding:6px 10px;
+    border-radius:8px; cursor:pointer; font-size:.72rem; font-weight:700;
+    transition:background .12s; white-space:nowrap;
+  }
+  .state-opt:hover { background:rgba(255,255,255,0.07); }
+
+  /* Priority badge on items */
+  .prio-badge {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:2px 8px; border-radius:20px; font-size:.6rem; font-weight:800;
+    white-space:nowrap; cursor:pointer; border:1px solid; transition:all .14s;
+    user-select:none;
+  }
+  .prio-badge:hover { filter:brightness(1.15); transform:scale(1.04); }
+
+  /* Priority dropdown */
+  .prio-menu {
+    position:absolute; z-index:200; top:calc(100% + 4px); right:0;
+    background:rgba(12,16,32,0.97); backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,0.1); border-radius:12px;
+    padding:4px; box-shadow:0 12px 40px rgba(0,0,0,0.7);
+    min-width:130px; display:none;
+  }
+  .prio-menu.open { display:block; animation:fadeDetail .14s ease; }
+  .prio-opt {
+    display:flex; align-items:center; gap:8px; padding:6px 10px;
+    border-radius:8px; cursor:pointer; font-size:.72rem; font-weight:700;
+    transition:background .12s; white-space:nowrap;
+  }
+  .prio-opt:hover { background:rgba(255,255,255,0.07); }
+
+  /* Overdue indicator */
+  .todo-item.overdue {
+    border-left-color:#FF5C5C !important;
+    box-shadow:inset 3px 0 12px rgba(255,92,92,0.12);
+  }
+  .badge-overdue {
+    font-size:.58rem; padding:2px 7px; border-radius:20px; font-weight:800;
+    background:rgba(255,92,92,0.14); color:#FF5C5C; white-space:nowrap;
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+  @keyframes confettiFall {
+    0%   { transform:translateY(0) rotate(0deg); opacity:1; }
+    100% { transform:translateY(110vh) rotate(720deg); opacity:0; }
+  }
+
+  /* Assignee avatar */
+  .assignee-avatar {
+    width:20px; height:20px; border-radius:50%; flex-shrink:0;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-size:.55rem; font-weight:800; border:1.5px solid rgba(255,255,255,0.12);
+    cursor:pointer; transition:transform .14s;
+  }
+  .assignee-avatar:hover { transform:scale(1.12); }
+
+  /* Sort bar */
+  .sort-bar {
+    display:flex; align-items:center; gap:.5rem;
+    margin-bottom:.7rem; padding:.38rem .6rem;
+    background:rgba(255,255,255,0.025); border-radius:10px;
+    border:1px solid var(--border);
+  }
+  .sort-label { font-size:.6rem; font-weight:700; color:var(--text-dim); letter-spacing:1.5px; text-transform:uppercase; white-space:nowrap; }
+  .sort-select {
+    flex:1; background:transparent; border:none; outline:none;
+    color:var(--text-muted); font-size:.72rem; font-family:inherit;
+    font-weight:700; cursor:pointer;
+  }
+  .sort-select option { background:#0d1428; color:var(--text); }
+  .sort-dir {
+    width:24px; height:24px; background:none; border:1px solid var(--border);
+    border-radius:6px; color:var(--text-muted); font-size:.8rem;
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition:all .14s; flex-shrink:0;
+  }
+  .sort-dir:hover { background:rgba(232,160,48,0.1); border-color:rgba(232,160,48,0.3); color:var(--accent); }
+
+  /* State filter chips (replace old filter-btn) */
+  .state-filter-row { display:flex; gap:.38rem; margin-bottom:.6rem; flex-wrap:wrap; align-items:center; }
+  .sf-btn {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:.3rem .78rem; border-radius:20px;
+    background:transparent; border:1px solid rgba(255,255,255,0.07);
+    color:var(--text-muted); font-size:.68rem; font-weight:700;
+    cursor:pointer; font-family:inherit; transition:all .15s; white-space:nowrap;
+  }
+  .sf-btn:hover { border-color:rgba(255,255,255,0.18); color:var(--text); }
+  .sf-btn.active { color:var(--text) !important; }
+  .sf-btn .sf-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .sf-count { font-size:.58rem; opacity:.65; }
+
+  /* Users card */
+  .user-list { display:flex; flex-direction:column; gap:4px; margin-bottom:.55rem; }
+  .user-item {
+    display:flex; align-items:center; gap:.55rem; padding:.36rem .6rem;
+    border-radius:10px; border:1px solid transparent; transition:all .14s;
+  }
+  .user-item:hover { background:rgba(255,255,255,0.04); border-color:var(--border); }
+  .user-avatar-lg {
+    width:28px; height:28px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:.68rem; font-weight:800; border:1.5px solid rgba(255,255,255,0.12);
+  }
+  .user-name { flex:1; font-size:.78rem; font-weight:700; color:var(--text); }
+  .user-del  { width:18px; height:18px; border:none; background:none; cursor:pointer; border-radius:5px; color:rgba(255,80,80,0.28); font-size:.85rem; display:flex; align-items:center; justify-content:center; transition:all .13s; opacity:0; }
+  .user-item:hover .user-del { opacity:1; }
+  .user-del:hover { background:rgba(255,80,80,0.1); color:var(--red); }
+
+  .user-add-row { display:flex; gap:.4rem; margin-top:.4rem; }
+  .user-add-input { flex:1; padding:.38rem .65rem; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:9px; font-size:.77rem; color:var(--text); font-family:inherit; outline:none; transition:border-color .16s; }
+  .user-add-input:focus { border-color:rgba(232,160,48,0.38); }
+  .user-add-input::placeholder { color:var(--text-dim); }
+  .user-add-btn { padding:.38rem .75rem; background:var(--accent); color:#000; border:none; border-radius:9px; font-size:.74rem; font-weight:800; cursor:pointer; transition:all .16s; white-space:nowrap; }
+  .user-add-btn:hover { background:#F0B840; }
+
+  /* Task count in stats with overdue */
+  .stat.overdue-stat .stat-num { color:var(--red); text-shadow:0 0 20px rgba(255,92,92,0.4); }
+
   /* ══ CURSOR PET ═══════════════════════════════════════════ */
   #wdog { position:fixed; width:50px; z-index:999; pointer-events:none; will-change:left,top; filter:drop-shadow(0 3px 10px rgba(0,0,0,.88)); image-rendering:pixelated; }
   #wdog svg { overflow:visible; width:100%; display:block; }
@@ -744,8 +937,11 @@
       </div>
       <div class="stats">
         <div class="stat"><div class="stat-num" id="s-total">0</div><div class="stat-label">Total</div></div>
-        <div class="stat"><div class="stat-num" id="s-pending">0</div><div class="stat-label">Actives</div></div>
+        <div class="stat"><div class="stat-num" id="s-pending">0</div><div class="stat-label">Pendents</div></div>
         <div class="stat"><div class="stat-num" id="s-done">0</div><div class="stat-label">Fetes</div></div>
+        <div class="stat"><div class="stat-num" id="s-inprogress">0</div><div class="stat-label">En curs</div></div>
+        <div class="stat overdue-stat"><div class="stat-num" id="s-overdue">0</div><div class="stat-label">Vencudes</div></div>
+        <div class="stat"><div class="stat-num" id="s-today">0</div><div class="stat-label">Avui</div></div>
       </div>
     </div>
 
@@ -794,6 +990,19 @@
       </div>
     </div>
 
+    <!-- Usuaris -->
+    <div class="card">
+      <div class="card-title">
+        <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
+        Persones
+      </div>
+      <div class="user-list" id="user-list"></div>
+      <div class="user-add-row">
+        <input type="text" class="user-add-input" id="user-add-input" placeholder="Nom de la persona…" maxlength="30" />
+        <button class="user-add-btn" id="user-add-btn">+ Afegir</button>
+      </div>
+    </div>
+
     <!-- Fotos -->
     <div class="card">
       <div class="card-title">
@@ -834,10 +1043,20 @@
         </select>
         <input type="date" class="opt" id="todo-date" />
         <input type="time" class="opt" id="todo-time" />
+        <select class="opt" id="todo-state">
+          <option value="todo">○ Per fer</option>
+          <option value="inprogress">◑ En curs</option>
+          <option value="inreview">◐ En revisió</option>
+          <option value="done">● Feta</option>
+        </select>
         <select class="opt" id="todo-priority">
-          <option value="normal">· Normal</option>
-          <option value="high">! Urgent</option>
+          <option value="normal">– Normal</option>
           <option value="low">↓ Baixa</option>
+          <option value="high">↑ Alta</option>
+          <option value="urgent">‼ Urgent</option>
+        </select>
+        <select class="opt" id="todo-assignee">
+          <option value="">👤 Assignar</option>
         </select>
         <div class="color-picker" id="color-picker">
           <div class="color-dot none sel" data-color=""     title="Sense color"></div>
@@ -852,15 +1071,53 @@
       </div>
     </div>
 
-    <!-- Filters + tag filter row -->
-    <div class="filters">
-      <button class="filter-btn active" data-filter="all">Tot</button>
-      <button class="filter-btn" data-filter="active">Actives</button>
-      <button class="filter-btn" data-filter="completed">Fetes</button>
-      <button class="filter-btn" data-filter="high">Urgents</button>
-      <button class="filter-btn" data-filter="today">Avui</button>
+    <!-- State filter chips -->
+    <div class="state-filter-row" id="state-filter-row">
+      <button class="sf-btn active" data-sf="all">
+        <span class="sf-dot" style="background:rgba(255,255,255,0.4)"></span>
+        Totes <span class="sf-count" id="sf-count-all"></span>
+      </button>
+      <button class="sf-btn" data-sf="todo">
+        <span class="sf-dot" style="background:rgba(255,255,255,0.55)"></span>
+        Per fer <span class="sf-count" id="sf-count-todo"></span>
+      </button>
+      <button class="sf-btn" data-sf="inprogress">
+        <span class="sf-dot" style="background:#60A5FA"></span>
+        En curs <span class="sf-count" id="sf-count-inprogress"></span>
+      </button>
+      <button class="sf-btn" data-sf="inreview">
+        <span class="sf-dot" style="background:#C084FC"></span>
+        Revisió <span class="sf-count" id="sf-count-inreview"></span>
+      </button>
+      <button class="sf-btn" data-sf="done">
+        <span class="sf-dot" style="background:#4ADE80"></span>
+        Fetes <span class="sf-count" id="sf-count-done"></span>
+      </button>
+      <button class="sf-btn" data-sf="overdue" style="color:rgba(255,92,92,0.7);border-color:rgba(255,92,92,0.2)">
+        <span class="sf-dot" style="background:#FF5C5C"></span>
+        Vencudes <span class="sf-count" id="sf-count-overdue"></span>
+      </button>
+      <button class="sf-btn" data-sf="today">
+        <span class="sf-dot" style="background:var(--accent)"></span>
+        Avui <span class="sf-count" id="sf-count-today"></span>
+      </button>
       <button class="clear-btn" id="clear-btn">Netejar fetes</button>
     </div>
+
+    <!-- Sort bar -->
+    <div class="sort-bar">
+      <span class="sort-label">Ordre</span>
+      <select class="sort-select" id="sort-select">
+        <option value="created">Creació</option>
+        <option value="due">Data límit</option>
+        <option value="priority">Prioritat</option>
+        <option value="state">Estat</option>
+        <option value="alpha">A–Z</option>
+      </select>
+      <button class="sort-dir" id="sort-dir" title="Invertir ordre">↓</button>
+    </div>
+
+    <!-- Tag filter row -->
     <div class="tag-filter-row" id="tag-filter-row"></div>
 
     <div class="todo-list" id="todo-list"></div>
@@ -946,6 +1203,31 @@ const TAGS = {
   klaus   : { label:'Klaus',    emoji:'🐾', color:'#C8922A' },
 };
 
+/* Fase 1 v2 — estats de tasca */
+const STATES = {
+  todo      : { label:'Per fer',    icon:'○', color:'rgba(255,255,255,0.55)', bg:'rgba(255,255,255,0.07)',  border:'rgba(255,255,255,0.18)' },
+  inprogress: { label:'En curs',    icon:'◑', color:'#60A5FA',               bg:'rgba(59,130,246,0.14)',   border:'rgba(59,130,246,0.4)'   },
+  inreview  : { label:'En revisió', icon:'◐', color:'#C084FC',               bg:'rgba(168,85,247,0.14)',   border:'rgba(168,85,247,0.4)'   },
+  done      : { label:'Feta',       icon:'●', color:'#4ADE80',               bg:'rgba(74,222,128,0.14)',   border:'rgba(74,222,128,0.4)'   },
+};
+
+/* Fase 1 v2 — prioritats (4 nivells) */
+const PRIORITIES = {
+  low   : { label:'Baixa',  icon:'↓', color:'#4ADE80', bg:'rgba(74,222,128,0.12)',  border:'rgba(74,222,128,0.35)'  },
+  normal: { label:'Normal', icon:'–', color:'#94A3B8', bg:'rgba(148,163,184,0.1)',  border:'rgba(148,163,184,0.3)'  },
+  high  : { label:'Alta',   icon:'↑', color:'#FB923C', bg:'rgba(251,146,60,0.12)',  border:'rgba(251,146,60,0.35)'  },
+  urgent: { label:'Urgent', icon:'‼', color:'#FF5C5C', bg:'rgba(255,92,92,0.12)',   border:'rgba(255,92,92,0.4)'    },
+};
+
+/* Sort options */
+const SORT_OPTIONS = {
+  created : 'Creació',
+  due     : 'Data límit',
+  priority: 'Prioritat',
+  state   : 'Estat',
+  alpha   : 'A–Z',
+};
+
 /* ─── UTILS ──────────────────────────────────────────────────── */
 const $   = id => document.getElementById(id);
 const pad = n  => String(n).padStart(2, '0');
@@ -1024,10 +1306,116 @@ const Calendar = {
 
 /* ─── TODOS ──────────────────────────────────────────────────── */
 const Todos = {
-  filter   : 'all',
-  activeTag: null,      // tag filter
-  _selTags : [],        // tags selected in add form
-  _selColor: '',        // color selected in add form
+  stateFilter: 'all',   // all/todo/inprogress/inreview/done/overdue/today/day
+  sortBy     : 'created',
+  sortAsc    : true,
+  activeTag  : null,
+  _selTags   : [],
+  _selColor  : '',
+
+  /* ── Update sf-btn chip counts ──────────────────────────── */
+  updateFilterCounts() {
+    const todos = DB.getTodos();
+    const tod   = today();
+    const counts = {
+      all       : todos.length,
+      todo      : todos.filter(t => t.state==='todo').length,
+      inprogress: todos.filter(t => t.state==='inprogress').length,
+      inreview  : todos.filter(t => t.state==='inreview').length,
+      done      : todos.filter(t => t.state==='done').length,
+      overdue   : todos.filter(t => t.state!=='done' && t.date && t.date < tod).length,
+      today     : todos.filter(t => t.date===tod).length,
+    };
+    document.querySelectorAll('.sf-btn').forEach(btn => {
+      const f   = btn.dataset.sf;
+      const cnt = btn.querySelector('.sf-count');
+      if (cnt) cnt.textContent = counts[f] ?? '';
+      btn.classList.toggle('active', f === this.stateFilter);
+    });
+  },
+
+  /* ── Inline state badge ─────────────────────────────────── */
+  makeStateBadge(todo) {
+    const s    = STATES[todo.state] || STATES.todo;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+
+    const badge = document.createElement('button');
+    badge.className = 'state-badge';
+    badge.style.cssText = `color:${s.color};background:${s.bg};border-color:${s.border}`;
+    badge.innerHTML = `<span>${s.icon}</span> ${s.label}`;
+
+    const menu = document.createElement('div');
+    menu.className = 'state-menu';
+
+    Object.entries(STATES).forEach(([key, st]) => {
+      const opt = document.createElement('button');
+      opt.className = 'state-opt' + (todo.state===key ? ' active' : '');
+      opt.style.cssText = `color:${st.color}`;
+      opt.innerHTML = `<span>${st.icon}</span> ${st.label}`;
+      opt.addEventListener('click', e => {
+        e.stopPropagation();
+        DB.setState(todo.id, key);
+        if (key === 'done') launchConfetti();
+        menu.classList.remove('open');
+        refresh();
+      });
+      menu.appendChild(opt);
+    });
+
+    badge.addEventListener('click', e => {
+      e.stopPropagation();
+      document.querySelectorAll('.state-menu.open,.prio-menu.open').forEach(m => {
+        if (m !== menu) m.classList.remove('open');
+      });
+      menu.classList.toggle('open');
+    });
+
+    wrap.appendChild(badge);
+    wrap.appendChild(menu);
+    return wrap;
+  },
+
+  /* ── Inline priority badge ──────────────────────────────── */
+  makePrioBadge(todo) {
+    const p    = PRIORITIES[todo.priority] || PRIORITIES.normal;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+
+    const badge = document.createElement('button');
+    badge.className = 'prio-badge';
+    badge.style.cssText = `color:${p.color};background:${p.bg};border-color:${p.border}`;
+    badge.innerHTML = `<span>${p.icon}</span> ${p.label}`;
+
+    const menu = document.createElement('div');
+    menu.className = 'prio-menu';
+
+    Object.entries(PRIORITIES).forEach(([key, pr]) => {
+      const opt = document.createElement('button');
+      opt.className = 'prio-opt' + (todo.priority===key ? ' active' : '');
+      opt.style.cssText = `color:${pr.color}`;
+      opt.innerHTML = `<span>${pr.icon}</span> ${pr.label}`;
+      opt.addEventListener('click', e => {
+        e.stopPropagation();
+        DB.updateTodo(todo.id, { priority: key });
+        menu.classList.remove('open');
+        refresh();
+      });
+      menu.appendChild(opt);
+    });
+
+    badge.addEventListener('click', e => {
+      e.stopPropagation();
+      document.querySelectorAll('.state-menu.open,.prio-menu.open').forEach(m => {
+        if (m !== menu) m.classList.remove('open');
+      });
+      menu.classList.toggle('open');
+    });
+
+    wrap.appendChild(badge);
+    wrap.appendChild(menu);
+    return wrap;
+  },
 
   /* ── Tag / color selection in add form ──────────────────── */
   toggleAddTag(tag) {
@@ -1041,7 +1429,7 @@ const Todos = {
 
   selectColor(color) {
     this._selColor = color;
-    document.querySelectorAll('.color-dot').forEach(d =>
+    document.querySelectorAll('#color-picker .color-dot').forEach(d =>
       d.classList.toggle('sel', d.dataset.color === color)
     );
   },
@@ -1051,7 +1439,9 @@ const Todos = {
     $('todo-date').value     = '';
     $('todo-time').value     = '';
     $('todo-priority').value = 'normal';
+    $('todo-state').value    = 'todo';
     $('todo-list').value     = '';
+    const asel = $('todo-assignee'); if (asel) asel.value = '';
     this._selTags  = [];
     this._selColor = '';
     document.querySelectorAll('.tag-toggle').forEach(b => b.classList.remove('active'));
@@ -1061,6 +1451,7 @@ const Todos = {
   /* ── Tag filter row ─────────────────────────────────────── */
   renderTagFilterRow() {
     const row = $('tag-filter-row');
+    if (!row) return;
     row.innerHTML = '';
     Object.entries(TAGS).forEach(([key, t]) => {
       const btn = document.createElement('button');
@@ -1095,8 +1486,9 @@ const Todos = {
     </svg>`;
     div.addEventListener('click', () => {
       const t = DB.toggleTodo(id);
+      if (t.state === 'done') launchConfetti();
       refresh();
-      toast(t.completed ? '🐾 Feta!' : '↩ De tornada');
+      toast(t.state === 'done' ? '🐾 Feta!' : '↩ De tornada');
     });
     return div;
   },
@@ -1107,13 +1499,15 @@ const Todos = {
     const tod  = today();
     let todos  = DB.getTodos();
 
-    /* Status filter */
-    switch (this.filter) {
-      case 'active'   : todos = todos.filter(t => !t.completed); break;
-      case 'completed': todos = todos.filter(t =>  t.completed); break;
-      case 'high'     : todos = todos.filter(t =>  t.priority==='high' && !t.completed); break;
-      case 'today'    : todos = todos.filter(t =>  t.date===tod); break;
-      case 'day'      : todos = todos.filter(t =>  t.date===Calendar.selectedDay); break;
+    /* State filter */
+    switch (this.stateFilter) {
+      case 'todo'      : todos = todos.filter(t => t.state==='todo'); break;
+      case 'inprogress': todos = todos.filter(t => t.state==='inprogress'); break;
+      case 'inreview'  : todos = todos.filter(t => t.state==='inreview'); break;
+      case 'done'      : todos = todos.filter(t => t.state==='done'); break;
+      case 'overdue'   : todos = todos.filter(t => t.state!=='done' && t.date && t.date < tod); break;
+      case 'today'     : todos = todos.filter(t => t.date===tod); break;
+      case 'day'       : todos = todos.filter(t => t.date===Calendar.selectedDay); break;
     }
 
     /* Tag filter */
@@ -1125,6 +1519,29 @@ const Todos = {
     if (Lists.active !== null) {
       todos = todos.filter(t => t.list_id === Lists.active);
     }
+
+    /* Sort */
+    const priOrder = { urgent:0, high:1, normal:2, low:3 };
+    const stOrder  = { inprogress:0, inreview:1, todo:2, done:3 };
+    const dir      = this.sortAsc ? 1 : -1;
+    todos.sort((a, b) => {
+      let r = 0;
+      switch (this.sortBy) {
+        case 'priority': r = (priOrder[a.priority]??2) - (priOrder[b.priority]??2); break;
+        case 'state'   : r = (stOrder[a.state]??2)    - (stOrder[b.state]??2);     break;
+        case 'due': {
+          if (a.date && b.date) r = a.date.localeCompare(b.date);
+          else if (a.date) r = -1;
+          else if (b.date) r = 1;
+          break;
+        }
+        case 'alpha': r = a.text.localeCompare(b.text); break;
+        default      : r = a.createdAt.localeCompare(b.createdAt); break;
+      }
+      return r * dir;
+    });
+
+    this.updateFilterCounts();
 
     list.innerHTML = '';
 
@@ -1144,28 +1561,20 @@ const Todos = {
       return;
     }
 
-    /* Sort */
-    todos.sort((a,b) => {
-      if (a.completed!==b.completed)                     return a.completed?1:-1;
-      if (a.priority==='high'&&b.priority!=='high')      return -1;
-      if (b.priority==='high'&&a.priority!=='high')      return  1;
-      if (a.date&&b.date)                                return a.date.localeCompare(b.date);
-      if (a.date) return -1;
-      if (b.date) return  1;
-      return 0;
-    });
-
     todos.forEach(todo => {
+      const isOverdue = todo.state!=='done' && todo.date && todo.date < tod;
+      const s = STATES[todo.state] || STATES.todo;
+
       /* ── Container ─ */
       const el = document.createElement('div');
-      el.className = `todo-item p-${todo.priority}${todo.completed?' completed':''}`;
-      if (todo.color) el.style.borderLeftColor = todo.color;
+      el.className = `todo-item p-${todo.priority}${todo.state==='done'?' completed':''}${isOverdue?' overdue':''}`;
+      el.style.borderLeftColor = todo.color || s.border;
 
       /* ── Checkbox ─ */
-      el.appendChild(this.makePawChk(todo.id, todo.completed));
+      el.appendChild(this.makePawChk(todo.id, todo.state==='done'));
 
       /* ── Body ─ */
-      const body   = document.createElement('div');
+      const body = document.createElement('div');
       body.className = 'todo-body';
 
       /* Top row */
@@ -1177,20 +1586,31 @@ const Todos = {
       txt.textContent = todo.text;
       topRow.appendChild(txt);
 
-      /* Meta: tags + time + date + priority */
+      /* Meta row */
       const meta = document.createElement('div');
       meta.className = 'todo-meta';
+
+      meta.appendChild(this.makeStateBadge(todo));
+      meta.appendChild(this.makePrioBadge(todo));
+
+      if (isOverdue) {
+        const b = document.createElement('span');
+        b.className = 'badge-overdue';
+        b.textContent = '⚠ Vençuda';
+        meta.appendChild(b);
+      }
 
       if (todo.list_id) {
         const lst = DB.getLists().find(l => l.id === todo.list_id);
         if (lst) {
           const b = document.createElement('span');
-          b.className   = 'badge-list';
+          b.className = 'badge-list';
           b.style.cssText = `background:${lst.color}1a;color:${lst.color};`;
           b.textContent = `${lst.emoji} ${lst.name}`;
           meta.appendChild(b);
         }
       }
+
       if (todo.tags) {
         todo.tags.split(',').filter(Boolean).forEach(key => {
           const t = TAGS[key]; if (!t) return;
@@ -1200,33 +1620,42 @@ const Todos = {
           meta.appendChild(pill);
         });
       }
+
       if (todo.time) {
         const b = document.createElement('span');
         b.className = 'todo-badge badge-time';
         b.textContent = todo.time;
         meta.appendChild(b);
       }
+
       if (todo.date) {
         const b = document.createElement('span');
         b.className = 'todo-badge badge-date';
         b.textContent = fmtShort(todo.date);
         meta.appendChild(b);
       }
-      if (todo.priority==='high' && !todo.completed) {
-        const b = document.createElement('span');
-        b.className = 'todo-badge badge-high';
-        b.textContent = 'Urgent';
-        meta.appendChild(b);
-      }
+
       topRow.appendChild(meta);
 
-      /* Actions: expand + delete */
+      /* Actions: assignee avatar + expand + delete */
       const actions = document.createElement('div');
       actions.className = 'todo-actions';
 
+      if (todo.assignee) {
+        const user = DB.getUsers().find(u => u.id === todo.assignee);
+        if (user) {
+          const av = document.createElement('div');
+          av.className   = 'assignee-avatar';
+          av.style.background = user.color;
+          av.title       = user.name;
+          av.textContent = user.initials;
+          actions.appendChild(av);
+        }
+      }
+
       const expandBtn = document.createElement('button');
-      expandBtn.className = 'expand-btn';
-      expandBtn.title     = 'Notes';
+      expandBtn.className   = 'expand-btn';
+      expandBtn.title       = 'Notes';
       expandBtn.textContent = '▾';
 
       const delBtn = document.createElement('button');
@@ -1254,7 +1683,6 @@ const Todos = {
       noteArea.placeholder = 'Afegir notes…';
       noteArea.value       = todo.notes || '';
 
-      /* Auto-save notes with debounce */
       let noteTimer;
       noteArea.addEventListener('input', () => {
         clearTimeout(noteTimer);
@@ -1265,7 +1693,6 @@ const Todos = {
       body.appendChild(detail);
       el.appendChild(body);
 
-      /* Expand toggle */
       expandBtn.addEventListener('click', () => {
         const open = detail.classList.toggle('open');
         expandBtn.classList.toggle('open', open);
@@ -1286,15 +1713,18 @@ const Todos = {
       inp.focus();
       return;
     }
+    const asel = $('todo-assignee');
     DB.addTodo(
       text,
-      $('todo-date').value || null,
+      $('todo-date').value     || null,
       $('todo-priority').value,
-      '',                           // notes
-      this._selTags.join(','),      // tags
-      this._selColor || null,       // color
-      $('todo-time').value || null, // time
-      $('todo-list').value || null  // list_id
+      '',
+      this._selTags.join(','),
+      this._selColor           || null,
+      $('todo-time').value     || null,
+      $('todo-list').value     || null,
+      $('todo-state').value    || 'todo',
+      asel ? (asel.value || null) : null
     );
     this.resetForm();
     refresh();
@@ -1302,9 +1732,8 @@ const Todos = {
   },
 
   setFilter(f, resetDay = true) {
-    this.filter = f;
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter===f));
-    if (resetDay && f!=='day') {
+    this.stateFilter = f;
+    if (resetDay && f !== 'day') {
       Calendar.selectedDay = null;
       $('quick-add').style.display = 'none';
       $('sel-info').textContent = 'Selecciona un dia per veure o afegir tasques';
@@ -1314,7 +1743,7 @@ const Todos = {
   },
 
   clearCompleted() {
-    const count = DB.getTodos().filter(t=>t.completed).length;
+    const count = DB.getTodos().filter(t => t.state==='done' || t.completed).length;
     if (!count) { toast('Cap tasca feta per eliminar'); return; }
     DB.clearCompleted();
     refresh();
@@ -1326,9 +1755,12 @@ const Todos = {
 const Stats = {
   render() {
     const s = DB.getStats();
-    $('s-total').textContent   = s.total;
-    $('s-pending').textContent = s.pending;
-    $('s-done').textContent    = s.completed;
+    $('s-total').textContent      = s.total;
+    $('s-pending').textContent    = s.pending;
+    $('s-done').textContent       = s.completed;
+    $('s-inprogress').textContent = s.inprogress;
+    $('s-overdue').textContent    = s.overdue;
+    $('s-today').textContent      = s.today;
   },
 };
 
@@ -1451,6 +1883,93 @@ const Lists = {
   },
 };
 
+/* ─── USERS ──────────────────────────────────────────────────── */
+const Users = {
+  _colors: ['#E8A030','#60A5FA','#4ADE80','#C084FC','#FB923C','#F472B6','#34D399','#FBBF24'],
+  _colorIdx: 0,
+
+  render() {
+    const container = $('user-list');
+    if (!container) return;
+    const users = DB.getUsers();
+    container.innerHTML = '';
+
+    if (users.length === 0) {
+      container.innerHTML = `<div style="font-size:.75rem;color:var(--text-dim);padding:.25rem 0">Sense assignats encara</div>`;
+    }
+
+    users.forEach(user => {
+      const item = document.createElement('div');
+      item.className = 'user-item';
+      item.innerHTML = `
+        <div class="user-avatar-lg" style="background:${user.color}">${user.initials}</div>
+        <span class="user-name">${this._esc(user.name)}</span>
+        <button class="user-del" title="Eliminar">×</button>
+      `;
+      item.querySelector('.user-del').addEventListener('click', () => {
+        DB.deleteUser(user.id);
+        this.render();
+        this._populateSelect();
+        refresh();
+        toast(`👤 "${user.name}" eliminat`);
+      });
+      container.appendChild(item);
+    });
+  },
+
+  add() {
+    const inp  = $('user-add-input');
+    const name = inp.value.trim();
+    if (!name) { inp.focus(); return; }
+    const color = this._colors[this._colorIdx++ % this._colors.length];
+    DB.addUser(name, color);
+    inp.value = '';
+    this.render();
+    this._populateSelect();
+    toast(`👤 "${name}" afegit!`);
+  },
+
+  _populateSelect() {
+    const sel = $('todo-assignee');
+    if (!sel) return;
+    const curVal = sel.value;
+    const users  = DB.getUsers();
+    sel.innerHTML = '<option value="">— Sense assignar —</option>';
+    users.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value       = u.id;
+      opt.textContent = `${u.initials} ${u.name}`;
+      sel.appendChild(opt);
+    });
+    if (curVal && users.find(u => u.id === curVal)) sel.value = curVal;
+  },
+
+  _esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  },
+};
+
+/* ─── CONFETTI ───────────────────────────────────────────────── */
+function launchConfetti() {
+  const colors = ['#E8A030','#60A5FA','#4ADE80','#C084FC','#FB923C','#F472B6','#FBBF24'];
+  const count  = 60;
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    const size = 6 + Math.random() * 8;
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const x = Math.random() * window.innerWidth;
+    const dur = 900 + Math.random() * 600;
+    p.style.cssText = `
+      position:fixed;top:-10px;left:${x}px;width:${size}px;height:${size}px;
+      background:${color};border-radius:${Math.random()>.5?'50%':'2px'};
+      pointer-events:none;z-index:9999;opacity:1;
+      animation:confettiFall ${dur}ms ease-in forwards;
+    `;
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), dur + 100);
+  }
+}
+
 /* ─── PHOTOS ─────────────────────────────────────────────────── */
 const Photos = {
   render() {
@@ -1492,7 +2011,7 @@ const Photos = {
 };
 
 /* ─── REFRESH ────────────────────────────────────────────────── */
-function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); }
+function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); Users.render(); }
 
 /* ─── EVENT BINDING ──────────────────────────────────────────── */
 function bindEvents() {
@@ -1504,11 +2023,26 @@ function bindEvents() {
   $('qa-input').addEventListener('keydown', e => { if(e.key==='Enter') Calendar.quickAdd(); });
   $('add-btn').addEventListener('click',    () => Todos.add());
   $('todo-input').addEventListener('keydown', e => { if(e.key==='Enter') Todos.add(); });
-  document.querySelectorAll('.filter-btn').forEach(b =>
-    b.addEventListener('click', () => Todos.setFilter(b.dataset.filter))
-  );
-  $('clear-btn').addEventListener('click', () => Todos.clearCompleted());
+  $('clear-btn').addEventListener('click',  () => Todos.clearCompleted());
   $('file-input').addEventListener('change', () => Photos.handleFiles(Array.from($('file-input').files)));
+
+  /* State filter chips */
+  document.querySelectorAll('.sf-btn').forEach(b =>
+    b.addEventListener('click', () => Todos.setFilter(b.dataset.sf))
+  );
+
+  /* Sort controls */
+  const sortSel = $('sort-select');
+  const sortDir = $('sort-dir');
+  if (sortSel) sortSel.addEventListener('change', () => {
+    Todos.sortBy = sortSel.value;
+    Todos.render();
+  });
+  if (sortDir) sortDir.addEventListener('click', () => {
+    Todos.sortAsc = !Todos.sortAsc;
+    sortDir.textContent = Todos.sortAsc ? '↓' : '↑';
+    Todos.render();
+  });
 
   /* Tag toggles in add form */
   document.querySelectorAll('.tag-toggle').forEach(b =>
@@ -1531,6 +2065,17 @@ function bindEvents() {
   document.querySelectorAll('#list-color-row .color-dot').forEach(d =>
     d.addEventListener('click', () => Lists.selectColor(d.dataset.color))
   );
+
+  /* Users */
+  const uBtn = $('user-add-btn');
+  const uInp = $('user-add-input');
+  if (uBtn) uBtn.addEventListener('click', () => Users.add());
+  if (uInp) uInp.addEventListener('keydown', e => { if (e.key==='Enter') Users.add(); });
+
+  /* Close state/prio dropdowns on outside click */
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.state-menu.open,.prio-menu.open').forEach(m => m.classList.remove('open'));
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1583,6 +2128,8 @@ DB.init()
     bindEvents();
     Todos.renderTagFilterRow();
     Lists._populateSelect();
+    Users.render();
+    Users._populateSelect();
     refresh();
   })
   .catch(err => {
