@@ -82,6 +82,9 @@
       /* Migrar completed → state */
       try { _db.run("UPDATE todos SET state='done' WHERE completed=1 AND (state IS NULL OR state='todo')"); } catch {}
 
+      /* Fase 4 — Descripció de projectes */
+      try { _db.run("ALTER TABLE lists ADD COLUMN description TEXT DEFAULT ''"); } catch {}
+
       /* Fase 3 — Comentaris */
       _db.run(`CREATE TABLE IF NOT EXISTS comments (
         id        TEXT PRIMARY KEY,
@@ -293,8 +296,8 @@
       _db.run('DELETE FROM lists WHERE id=?', [id]);
       this._save();
     },
-    updateList(id, name, emoji, color) {
-      _db.run('UPDATE lists SET name=?,emoji=?,color=? WHERE id=?', [name, emoji, color, id]);
+    updateList(id, name, emoji, color, description = '') {
+      _db.run('UPDATE lists SET name=?,emoji=?,color=?,description=? WHERE id=?', [name, emoji, color, description || '', id]);
       this._save();
     },
   };
@@ -699,6 +702,9 @@
   .list-name-input { width:100%; padding:.4rem .68rem; margin-bottom:.46rem; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:9px; font-size:.78rem; color:var(--text); font-family:inherit; outline:none; transition:border-color .16s; }
   .list-name-input:focus { border-color:rgba(232,160,48,0.36); }
   .list-name-input::placeholder { color:var(--text-dim); }
+  .list-desc-input { width:100%; padding:.38rem .68rem; margin-bottom:.46rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:9px; font-size:.74rem; color:var(--text); font-family:inherit; outline:none; transition:border-color .16s; resize:none; line-height:1.45; }
+  .list-desc-input:focus { border-color:rgba(232,160,48,0.36); }
+  .list-desc-input::placeholder { color:var(--text-dim); }
   .list-form-btns { display:flex; gap:.36rem; }
   .list-save-btn   { flex:1; padding:.38rem; background:var(--accent); color:#000; border:none; border-radius:9px; font-size:.73rem; font-weight:800; cursor:pointer; font-family:inherit; transition:all .16s; }
   .list-save-btn:hover { background:#F0B840; }
@@ -932,6 +938,70 @@
   .assignee-avatar:hover { transform:scale(1.12); }
 
   /* Sort bar */
+  /* ── Project header (shown when a project is active) ────── */
+  .project-header {
+    display:flex; align-items:center; gap:1rem;
+    padding:.9rem 1rem; margin-bottom:.75rem;
+    border-radius:16px; border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.03);
+    animation:slideIn .2s ease;
+  }
+  .proj-ring-wrap {
+    position:relative; flex-shrink:0;
+    width:72px; height:72px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .proj-ring-wrap svg { position:absolute; inset:0; }
+  .proj-ring-pct {
+    position:relative; z-index:1;
+    font-size:.85rem; font-weight:900; letter-spacing:-.02em;
+  }
+  .proj-info { flex:1; min-width:0; }
+  .proj-title-row {
+    display:flex; align-items:center; gap:.45rem; margin-bottom:.3rem;
+  }
+  .proj-emoji-big { font-size:1.25rem; flex-shrink:0; }
+  .proj-name-edit {
+    font-size:.95rem; font-weight:800; color:var(--text);
+    background:transparent; border:none; outline:none;
+    border-bottom:1px solid transparent; padding:.1rem .2rem;
+    font-family:inherit; min-width:60px; max-width:260px;
+    transition:border-color .15s; cursor:text;
+  }
+  .proj-name-edit:focus { border-bottom-color:rgba(232,160,48,0.4); }
+  .proj-desc-edit {
+    font-size:.75rem; color:var(--text-muted);
+    background:transparent; border:none; outline:none;
+    border-bottom:1px dashed transparent; padding:.08rem .2rem;
+    font-family:inherit; width:100%; transition:border-color .15s;
+    cursor:text; display:block;
+  }
+  .proj-desc-edit:focus { border-bottom-color:rgba(255,255,255,0.18); }
+  .proj-desc-edit:empty::before { content:attr(data-ph); color:var(--text-dim); pointer-events:none; }
+  .proj-stats-chips { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.3rem; }
+  .proj-stat-chip {
+    font-size:.66rem; font-weight:700; padding:.14rem .45rem;
+    border-radius:20px; background:rgba(255,255,255,0.06);
+    color:var(--text-muted); border:1px solid rgba(255,255,255,0.08);
+  }
+
+  /* ── Small ring on sidebar project items ─────────────────── */
+  .list-item { position:relative; }
+  .list-ring-wrap { flex-shrink:0; display:flex; align-items:center; }
+  .list-edit-btn {
+    opacity:0; transition:opacity .15s; background:none; border:none;
+    cursor:pointer; color:var(--text-dim); font-size:.78rem; padding:0 .18rem;
+    flex-shrink:0;
+  }
+  .list-item:hover .list-edit-btn { opacity:1; }
+  .list-edit-btn:hover { color:var(--accent); }
+
+  @keyframes ringFill {
+    from { stroke-dasharray: 0 1000; }
+    to   { stroke-dasharray: var(--ring-dash) 1000; }
+  }
+  .ring-arc { animation: ringFill .6s ease forwards; }
+
   .sort-bar {
     display:flex; align-items:center; gap:.5rem;
     margin-bottom:.7rem; padding:.38rem .6rem;
@@ -1150,15 +1220,15 @@
       </div>
     </div>
 
-    <!-- Llistes -->
+    <!-- Projectes -->
     <div class="card">
       <div class="card-title">
         <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
-        Llistes
+        Projectes
       </div>
       <div id="lists-container"></div>
       <div class="list-create-row">
-        <button class="list-new-btn" id="list-new-btn">+ Nova llista</button>
+        <button class="list-new-btn" id="list-new-btn">+ Nou projecte</button>
         <div class="list-create-form" id="list-create-form">
           <div class="list-emoji-row" id="list-emoji-row">
             <button class="list-emoji-opt sel" data-emoji="📋">📋</button>
@@ -1186,9 +1256,10 @@
             <div class="color-dot" data-color="#C07830" style="background:#C07830"></div>
             <div class="color-dot" data-color="#6E8090" style="background:#6E8090"></div>
           </div>
-          <input type="text" class="list-name-input" id="list-name-input" placeholder="Nom de la llista…" maxlength="32" />
+          <input type="text" class="list-name-input" id="list-name-input" placeholder="Nom del projecte…" maxlength="32" />
+          <textarea class="list-desc-input" id="list-desc-input" placeholder="Descripció (opcional)…" rows="2" maxlength="200"></textarea>
           <div class="list-form-btns">
-            <button class="list-save-btn" id="list-save-btn">Crear llista</button>
+            <button class="list-save-btn" id="list-save-btn">Crear projecte</button>
             <button class="list-cancel-btn" id="list-cancel-btn">Cancel·lar</button>
           </div>
         </div>
@@ -1277,6 +1348,21 @@
           <div class="color-dot"          data-color="#C07830" style="background:#C07830" title="Taronja"></div>
         </div>
         <button class="add-btn" id="add-btn">Afegir ✦</button>
+      </div>
+    </div>
+
+    <!-- Project header (shown when a project is selected) -->
+    <div id="project-header" class="project-header" style="display:none">
+      <div class="proj-ring-wrap" id="proj-ring-wrap">
+        <span class="proj-ring-pct" id="proj-ring-pct">0%</span>
+      </div>
+      <div class="proj-info">
+        <div class="proj-title-row">
+          <span class="proj-emoji-big" id="proj-emoji-big"></span>
+          <input class="proj-name-edit" id="proj-name-edit" type="text" />
+        </div>
+        <div class="proj-desc-edit" id="proj-desc-edit" contenteditable="true" data-ph="Afegir descripció del projecte…"></div>
+        <div class="proj-stats-chips" id="proj-stats-chips"></div>
       </div>
     </div>
 
@@ -2233,13 +2319,31 @@ const Stats = {
   },
 };
 
-/* ─── LISTS ──────────────────────────────────────────────────── */
+/* ─── LISTS / PROJECTS ───────────────────────────────────────── */
 const Lists = {
-  active    : null,   // active list_id filter (null = all)
+  active    : null,
   _selEmoji : '📋',
   _selColor : '#C8922A',
   _formOpen : false,
+  _editingId: null,    // id being edited (null = create mode)
+  _nameTimer: null,
+  _descTimer: null,
 
+  /* ── SVG ring utility ───────────────────────────────────── */
+  _ring(pct, sz, sw, color, track = 'rgba(255,255,255,0.08)') {
+    const r    = (sz - sw) / 2;
+    const circ = 2 * Math.PI * r;
+    const dash = (circ * Math.min(pct, 100) / 100).toFixed(2);
+    const cx   = sz / 2;
+    return `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">
+      <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${track}" stroke-width="${sw}"/>
+      <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}"
+        stroke-dasharray="${dash} ${circ.toFixed(2)}" stroke-linecap="round"
+        transform="rotate(-90 ${cx} ${cx})" class="ring-arc"/>
+    </svg>`;
+  },
+
+  /* ── Sidebar render ─────────────────────────────────────── */
   render() {
     const container = $('lists-container');
     const lists     = DB.getLists();
@@ -2248,42 +2352,161 @@ const Lists = {
 
     /* "Totes" button */
     const allBtn = document.createElement('button');
-    allBtn.className   = 'list-all-btn' + (this.active===null ? ' active' : '');
-    allBtn.innerHTML   = '📋 <span>Totes les tasques</span>';
-    allBtn.addEventListener('click', () => { this.select(null); });
+    allBtn.className = 'list-all-btn' + (this.active === null ? ' active' : '');
+    allBtn.innerHTML = '📋 <span>Totes les tasques</span>';
+    allBtn.addEventListener('click', () => this.select(null));
     container.appendChild(allBtn);
 
-    /* List items */
     lists.forEach(list => {
-      const count = todos.filter(t => t.list_id === list.id && !t.completed).length;
-      const item  = document.createElement('div');
-      item.className = 'list-item' + (this.active===list.id ? ' active' : '');
+      const listTodos = todos.filter(t => t.list_id === list.id);
+      const total     = listTodos.length;
+      const done      = listTodos.filter(t => t.state === 'done').length;
+      const pct       = total > 0 ? Math.round((done / total) * 100) : 0;
+      const pending   = listTodos.filter(t => t.state !== 'done').length;
+
+      const item = document.createElement('div');
+      item.className = 'list-item' + (this.active === list.id ? ' active' : '');
       item.style.color = list.color;
 
-      item.innerHTML = `
-        <span class="list-item-emoji">${list.emoji}</span>
-        <span class="list-item-name">${this._esc(list.name)}</span>
-        <span class="list-count">${count}</span>
-        <button class="list-del-btn" title="Eliminar llista">×</button>
-      `;
-      item.querySelector('.list-del-btn').addEventListener('click', e => {
+      /* Small progress ring */
+      const ringWrap = document.createElement('div');
+      ringWrap.className = 'list-ring-wrap';
+      ringWrap.innerHTML = this._ring(pct, 22, 2.5, list.color);
+      item.appendChild(ringWrap);
+
+      const emoji = document.createElement('span');
+      emoji.className = 'list-item-emoji';
+      emoji.textContent = list.emoji;
+      item.appendChild(emoji);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'list-item-name';
+      nameSpan.textContent = list.name;
+      item.appendChild(nameSpan);
+
+      const countSpan = document.createElement('span');
+      countSpan.className = 'list-count';
+      countSpan.textContent = pending;
+      item.appendChild(countSpan);
+
+      /* Edit button */
+      const editBtn = document.createElement('button');
+      editBtn.className   = 'list-edit-btn';
+      editBtn.title       = 'Editar projecte';
+      editBtn.textContent = '✎';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); this.editProject(list); });
+      item.appendChild(editBtn);
+
+      /* Delete button */
+      const delBtn = document.createElement('button');
+      delBtn.className   = 'list-del-btn';
+      delBtn.title       = 'Eliminar projecte';
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', e => {
         e.stopPropagation();
         if (this.active === list.id) this.select(null);
         DB.deleteList(list.id);
-        this.render();
-        this._populateSelect();
-        refresh();
-        toast(`🗑 "${list.name}" eliminada`);
+        this.render(); this._populateSelect(); refresh();
+        toast(`🗑 "${list.name}" eliminat`);
       });
+      item.appendChild(delBtn);
+
       item.addEventListener('click', () => this.select(list.id));
       container.appendChild(item);
     });
   },
 
+  /* ── Select a project ───────────────────────────────────── */
   select(id) {
     this.active = id;
     this.render();
+    this.renderProjectHeader();
     Todos.render();
+  },
+
+  /* ── Project header banner ──────────────────────────────── */
+  renderProjectHeader() {
+    const hdr = $('project-header');
+    if (!this.active) { hdr.style.display = 'none'; return; }
+
+    const list  = DB.getLists().find(l => l.id === this.active);
+    if (!list)  { hdr.style.display = 'none'; return; }
+
+    const todos  = DB.getTodos().filter(t => t.list_id === this.active);
+    const total  = todos.length;
+    const done   = todos.filter(t => t.state === 'done').length;
+    const prog   = todos.filter(t => t.state === 'inprogress').length;
+    const pct    = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    /* Ring */
+    const ringWrap = $('proj-ring-wrap');
+    ringWrap.style.color = list.color;
+    // Remove old SVG, keep the pct span
+    ringWrap.querySelectorAll('svg').forEach(s => s.remove());
+    ringWrap.insertAdjacentHTML('afterbegin', this._ring(pct, 72, 5, list.color));
+    $('proj-ring-pct').textContent = `${pct}%`;
+    $('proj-ring-pct').style.color = list.color;
+
+    /* Name */
+    const nameEl = $('proj-name-edit');
+    nameEl.value = list.name;
+    nameEl.style.color = list.color;
+    clearTimeout(this._nameTimer);
+    nameEl.oninput = () => {
+      clearTimeout(this._nameTimer);
+      this._nameTimer = setTimeout(() => {
+        if (nameEl.value.trim()) {
+          DB.updateList(this.active, nameEl.value.trim(), list.emoji, list.color, list.description || '');
+          this.render(); this._populateSelect();
+        }
+      }, 600);
+    };
+
+    /* Emoji */
+    $('proj-emoji-big').textContent = list.emoji;
+
+    /* Description */
+    const descEl = $('proj-desc-edit');
+    descEl.textContent = list.description || '';
+    clearTimeout(this._descTimer);
+    descEl.oninput = () => {
+      clearTimeout(this._descTimer);
+      this._descTimer = setTimeout(() => {
+        DB.updateList(this.active, list.name, list.emoji, list.color, descEl.textContent.trim());
+      }, 700);
+    };
+
+    /* Stats chips */
+    const chips = $('proj-stats-chips');
+    chips.innerHTML = `
+      <span class="proj-stat-chip" style="color:var(--text-muted)">📊 ${total} total</span>
+      <span class="proj-stat-chip" style="color:#4ADE80">✓ ${done} fetes</span>
+      ${prog  ? `<span class="proj-stat-chip" style="color:#60A5FA">◑ ${prog} en curs</span>` : ''}
+      ${total > done ? `<span class="proj-stat-chip" style="color:var(--accent)">○ ${total-done} pendents</span>` : ''}
+    `;
+
+    hdr.style.display = 'flex';
+    hdr.style.borderColor = list.color + '33';
+    hdr.style.background  = list.color + '0a';
+  },
+
+  /* ── Edit project (pre-fill form) ───────────────────────── */
+  editProject(list) {
+    this._editingId = list.id;
+    this._selEmoji  = list.emoji;
+    this._selColor  = list.color;
+    $('list-name-input').value = list.name;
+    const descInp = $('list-desc-input');
+    if (descInp) descInp.value = list.description || '';
+    $('list-save-btn').textContent = 'Actualitzar';
+    $('list-create-form').classList.add('open');
+    document.querySelectorAll('.list-emoji-opt').forEach(b =>
+      b.classList.toggle('sel', b.dataset.emoji === list.emoji)
+    );
+    document.querySelectorAll('#list-color-row .color-dot').forEach(d =>
+      d.classList.toggle('sel', d.dataset.color === list.color)
+    );
+    $('list-name-input').focus();
   },
 
   _esc(s) {
@@ -2291,16 +2514,17 @@ const Lists = {
   },
 
   openForm() {
-    this._formOpen = true;
-    this._selEmoji = '📋';
-    this._selColor = '#C8922A';
+    this._editingId = null;
+    this._selEmoji  = '📋';
+    this._selColor  = '#C8922A';
     $('list-name-input').value = '';
+    const descInp = $('list-desc-input');
+    if (descInp) descInp.value = '';
+    $('list-save-btn').textContent = 'Crear projecte';
     $('list-create-form').classList.add('open');
-    /* reset emoji */
     document.querySelectorAll('.list-emoji-opt').forEach(b =>
       b.classList.toggle('sel', b.dataset.emoji === '📋')
     );
-    /* reset color */
     document.querySelectorAll('#list-color-row .color-dot').forEach(d =>
       d.classList.toggle('sel', d.dataset.color === '#C8922A')
     );
@@ -2308,7 +2532,9 @@ const Lists = {
   },
 
   closeForm() {
-    this._formOpen = false;
+    this._editingId = null;
+    this._formOpen  = false;
+    $('list-save-btn').textContent = 'Crear projecte';
     $('list-create-form').classList.remove('open');
   },
 
@@ -2327,27 +2553,43 @@ const Lists = {
   },
 
   save() {
-    const name = $('list-name-input').value.trim();
+    const name    = $('list-name-input').value.trim();
     if (!name) { $('list-name-input').focus(); return; }
-    DB.addList(name, this._selEmoji, this._selColor);
-    this.closeForm();
-    this.render();
-    this._populateSelect();
-    toast(`📋 "${name}" creada!`);
+    const descInp = $('list-desc-input');
+    const desc    = descInp ? descInp.value.trim() : '';
+
+    if (this._editingId) {
+      DB.updateList(this._editingId, name, this._selEmoji, this._selColor, desc);
+      const wasActive = this.active === this._editingId;
+      this.closeForm();
+      this.render();
+      this._populateSelect();
+      if (wasActive) this.renderProjectHeader();
+      toast(`✅ Projecte actualitzat!`);
+    } else {
+      DB.addList(name, this._selEmoji, this._selColor);
+      // store description separately since addList doesn't support it yet
+      const lists = DB.getLists();
+      const newList = lists[lists.length - 1];
+      if (newList && desc) DB.updateList(newList.id, name, this._selEmoji, this._selColor, desc);
+      this.closeForm();
+      this.render();
+      this._populateSelect();
+      toast(`🎯 "${name}" creat!`);
+    }
   },
 
   _populateSelect() {
-    const sel   = $('todo-list');
+    const sel    = $('todo-list');
     const curVal = sel.value;
     const lists  = DB.getLists();
-    sel.innerHTML = '<option value="">📋 Cap llista</option>';
+    sel.innerHTML = '<option value="">📋 Cap projecte</option>';
     lists.forEach(l => {
       const opt = document.createElement('option');
       opt.value       = l.id;
       opt.textContent = `${l.emoji} ${l.name}`;
       sel.appendChild(opt);
     });
-    /* Restore previous selection if still valid */
     if (curVal && lists.find(l => l.id === curVal)) sel.value = curVal;
   },
 };
@@ -2750,7 +2992,7 @@ const Photos = {
 };
 
 /* ─── REFRESH ────────────────────────────────────────────────── */
-function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); Users.render(); }
+function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); Lists.renderProjectHeader(); Users.render(); }
 
 /* ─── EVENT BINDING ──────────────────────────────────────────── */
 function bindEvents() {
