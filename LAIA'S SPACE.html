@@ -517,6 +517,70 @@
   /* ══ TODO ITEMS ════════════════════════════════════════════ */
   .todo-list { display: flex; flex-direction: column; gap: .48rem; min-height: 140px; }
 
+  /* ── View toggle ─────────────────────────────────────────── */
+  .view-btns { display:flex; gap:.3rem; margin-left:auto; }
+  .vt-btn {
+    padding:.28rem .55rem; background:transparent; border:1px solid var(--border); border-radius:8px;
+    color:var(--text-muted); font-size:.68rem; font-weight:800; cursor:pointer; font-family:inherit;
+    transition:all .15s; letter-spacing:.02em;
+  }
+  .vt-btn:hover  { border-color:rgba(232,160,48,0.32); color:var(--accent); }
+  .vt-btn.active { background:rgba(232,160,48,0.11); border-color:rgba(232,160,48,0.45); color:var(--accent); }
+
+  /* ── Search ──────────────────────────────────────────────── */
+  .search-bar { margin-bottom:.5rem; }
+  .search-input {
+    width:100%; box-sizing:border-box;
+    padding:.42rem .75rem .42rem 2.1rem; background:rgba(255,255,255,0.05);
+    border:1px solid var(--border); border-radius:12px; font-size:.8rem; color:var(--text);
+    font-family:inherit; outline:none; transition:border-color .16s;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.28)' stroke-width='2.5' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:.65rem center;
+  }
+  .search-input:focus  { border-color:rgba(232,160,48,0.38); }
+  .search-input::placeholder { color:var(--text-dim); }
+
+  /* ── Kanban board ────────────────────────────────────────── */
+  .kanban-board {
+    gap:.65rem; overflow-x:auto; padding-bottom:.4rem; min-height:180px;
+    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.07) transparent;
+  }
+  .kanban-col {
+    flex:0 0 210px; display:flex; flex-direction:column;
+    background:rgba(255,255,255,0.026); border:1px solid var(--border); border-radius:14px;
+    overflow:hidden; transition:border-color .15s, background .15s;
+  }
+  .kanban-col.drop-target { border-color:var(--accent); background:rgba(232,160,48,0.055); }
+  .kanban-col-hdr {
+    display:flex; align-items:center; gap:.38rem; padding:.5rem .7rem;
+    font-size:.69rem; font-weight:800; letter-spacing:.04em;
+    border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .kanban-col-count {
+    margin-left:auto; background:rgba(255,255,255,0.08); border-radius:20px;
+    padding:.08rem .42rem; font-size:.62rem; font-weight:700; color:var(--text-muted);
+  }
+  .kanban-col-body {
+    flex:1; display:flex; flex-direction:column; gap:.38rem;
+    padding:.45rem; overflow-y:auto; max-height:440px;
+    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.05) transparent;
+  }
+  .kanban-card {
+    background:rgba(255,255,255,0.048); border:1px solid rgba(255,255,255,0.07);
+    border-radius:10px; padding:.5rem .6rem; cursor:grab;
+    transition:all .15s; border-left:3px solid transparent; user-select:none;
+    animation:slideIn .18s ease;
+  }
+  .kanban-card:hover { background:rgba(255,255,255,0.08); transform:translateY(-1px); box-shadow:0 4px 16px rgba(0,0,0,0.32); }
+  .kanban-card.dragging { opacity:.35; cursor:grabbing; transform:scale(.97); }
+  .kanban-card-text { font-size:.78rem; font-weight:600; color:var(--text); line-height:1.4; margin-bottom:.3rem; }
+  .kanban-card-meta { display:flex; gap:.28rem; flex-wrap:wrap; align-items:center; }
+  .kanban-empty {
+    flex:1; display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim); font-size:.71rem; padding:.9rem; text-align:center;
+    border:1px dashed rgba(255,255,255,0.06); border-radius:10px; margin:.1rem;
+  }
+
   .todo-item {
     display: flex; align-items: flex-start; gap: .72rem; padding: .8rem .95rem;
     background: rgba(255,255,255,0.032); border-radius: 14px;
@@ -1019,6 +1083,10 @@
     <div class="card-title">
       <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
       Tasques
+      <div class="view-btns">
+        <button class="vt-btn active" data-view="list"   title="Vista llista">☰ Llista</button>
+        <button class="vt-btn"        data-view="kanban" title="Vista kanban">⊞ Kanban</button>
+      </div>
     </div>
 
     <!-- Add form -->
@@ -1071,6 +1139,11 @@
       </div>
     </div>
 
+    <!-- Search -->
+    <div class="search-bar">
+      <input type="text" class="search-input" id="search-input" placeholder="🔍 Cerca tasques…" autocomplete="off" />
+    </div>
+
     <!-- State filter chips -->
     <div class="state-filter-row" id="state-filter-row">
       <button class="sf-btn active" data-sf="all">
@@ -1120,7 +1193,8 @@
     <!-- Tag filter row -->
     <div class="tag-filter-row" id="tag-filter-row"></div>
 
-    <div class="todo-list" id="todo-list"></div>
+    <div class="todo-list" id="todo-items"></div>
+    <div class="kanban-board" id="kanban-board" style="display:none"></div>
   </div>
 
 </main>
@@ -1306,12 +1380,14 @@ const Calendar = {
 
 /* ─── TODOS ──────────────────────────────────────────────────── */
 const Todos = {
-  stateFilter: 'all',   // all/todo/inprogress/inreview/done/overdue/today/day
-  sortBy     : 'created',
-  sortAsc    : true,
-  activeTag  : null,
-  _selTags   : [],
-  _selColor  : '',
+  stateFilter : 'all',   // all/todo/inprogress/inreview/done/overdue/today/day
+  sortBy      : 'created',
+  sortAsc     : true,
+  activeTag   : null,
+  _selTags    : [],
+  _selColor   : '',
+  view        : 'list',  // 'list' | 'kanban'
+  searchQuery : '',
 
   /* ── Update sf-btn chip counts ──────────────────────────── */
   updateFilterCounts() {
@@ -1495,9 +1571,18 @@ const Todos = {
 
   /* ── Main render ────────────────────────────────────────── */
   render() {
-    const list = $('todo-list');
+    /* Route to kanban if needed */
+    if (this.view === 'kanban') { this.renderKanban(); return; }
+
+    const list = $('todo-items');
     const tod  = today();
     let todos  = DB.getTodos();
+
+    /* Search filter */
+    if (this.searchQuery) {
+      const q = this.searchQuery.toLowerCase();
+      todos = todos.filter(t => t.text.toLowerCase().includes(q));
+    }
 
     /* State filter */
     switch (this.stateFilter) {
@@ -1740,6 +1825,175 @@ const Todos = {
     }
     Calendar.render();
     this.render();
+  },
+
+  /* ── View switcher ──────────────────────────────────────── */
+  setView(v) {
+    this.view = v;
+    document.querySelectorAll('.vt-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+    const isKanban = v === 'kanban';
+    $('todo-items').style.display       = isKanban ? 'none'  : '';
+    $('kanban-board').style.display     = isKanban ? 'flex'  : 'none';
+    $('state-filter-row').style.display = isKanban ? 'none'  : '';
+    this.render();
+  },
+
+  /* ── Kanban board ───────────────────────────────────────── */
+  renderKanban() {
+    const board = $('kanban-board');
+    const tod   = today();
+    let todos   = DB.getTodos();
+
+    /* Filters (search + tag + list) */
+    if (this.searchQuery) {
+      const q = this.searchQuery.toLowerCase();
+      todos = todos.filter(t => t.text.toLowerCase().includes(q));
+    }
+    if (this.activeTag) {
+      todos = todos.filter(t => t.tags && t.tags.split(',').includes(this.activeTag));
+    }
+    if (Lists.active !== null) {
+      todos = todos.filter(t => t.list_id === Lists.active);
+    }
+
+    /* Sort within columns */
+    const priOrder = { urgent:0, high:1, normal:2, low:3 };
+    const dir = this.sortAsc ? 1 : -1;
+    todos.sort((a, b) => {
+      let r = 0;
+      switch (this.sortBy) {
+        case 'priority': r = (priOrder[a.priority]??2) - (priOrder[b.priority]??2); break;
+        case 'due': {
+          if (a.date && b.date) r = a.date.localeCompare(b.date);
+          else if (a.date) r = -1; else if (b.date) r = 1; break;
+        }
+        case 'alpha': r = a.text.localeCompare(b.text); break;
+        default: r = a.createdAt.localeCompare(b.createdAt); break;
+      }
+      return r * dir;
+    });
+
+    this.updateFilterCounts();
+    board.innerHTML = '';
+    let draggingId = null;
+
+    Object.entries(STATES).forEach(([stateKey, st]) => {
+      const colTodos = todos.filter(t => t.state === stateKey);
+
+      const col = document.createElement('div');
+      col.className = 'kanban-col';
+      col.dataset.state = stateKey;
+
+      /* Header */
+      const hdr = document.createElement('div');
+      hdr.className = 'kanban-col-hdr';
+      hdr.style.color = st.color;
+      hdr.innerHTML = `<span>${st.icon}</span><span>${st.label}</span><span class="kanban-col-count">${colTodos.length}</span>`;
+      col.appendChild(hdr);
+
+      /* Body */
+      const body = document.createElement('div');
+      body.className = 'kanban-col-body';
+
+      if (colTodos.length === 0) {
+        const emp = document.createElement('div');
+        emp.className = 'kanban-empty';
+        emp.textContent = 'Cap tasca aquí';
+        body.appendChild(emp);
+      } else {
+        colTodos.forEach(todo => {
+          const isOverdue = todo.state !== 'done' && todo.date && todo.date < tod;
+          const p = PRIORITIES[todo.priority] || PRIORITIES.normal;
+
+          const card = document.createElement('div');
+          card.className  = 'kanban-card';
+          card.draggable  = true;
+          card.dataset.id = todo.id;
+          card.style.borderLeftColor = todo.color || p.color;
+
+          /* Text */
+          const textEl = document.createElement('div');
+          textEl.className   = 'kanban-card-text';
+          textEl.textContent = todo.text;
+          card.appendChild(textEl);
+
+          /* Meta */
+          const meta = document.createElement('div');
+          meta.className = 'kanban-card-meta';
+
+          const pb = document.createElement('span');
+          pb.className = 'prio-badge';
+          pb.style.cssText = `color:${p.color};background:${p.bg};border-color:${p.border};font-size:.62rem;padding:.08rem .3rem;gap:.2rem`;
+          pb.innerHTML = `${p.icon} ${p.label}`;
+          meta.appendChild(pb);
+
+          if (isOverdue) {
+            const ob = document.createElement('span');
+            ob.className   = 'badge-overdue';
+            ob.style.fontSize = '.62rem';
+            ob.textContent = '⚠';
+            meta.appendChild(ob);
+          }
+          if (todo.date) {
+            const db = document.createElement('span');
+            db.className   = 'todo-badge badge-date';
+            db.style.fontSize = '.62rem';
+            db.textContent = fmtShort(todo.date);
+            meta.appendChild(db);
+          }
+          if (todo.assignee) {
+            const user = DB.getUsers().find(u => u.id === todo.assignee);
+            if (user) {
+              const av = document.createElement('div');
+              av.className = 'assignee-avatar';
+              av.style.cssText = `background:${user.color};margin-left:auto`;
+              av.title = user.name;
+              av.textContent = user.initials;
+              meta.appendChild(av);
+            }
+          }
+          card.appendChild(meta);
+
+          /* Drag events */
+          card.addEventListener('dragstart', e => {
+            draggingId = todo.id;
+            card.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', todo.id);
+          });
+          card.addEventListener('dragend', () => {
+            card.classList.remove('dragging');
+            draggingId = null;
+            board.querySelectorAll('.drop-target').forEach(c => c.classList.remove('drop-target'));
+          });
+
+          body.appendChild(card);
+        });
+      }
+
+      /* Drop zone */
+      col.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        col.classList.add('drop-target');
+      });
+      col.addEventListener('dragleave', e => {
+        if (!col.contains(e.relatedTarget)) col.classList.remove('drop-target');
+      });
+      col.addEventListener('drop', e => {
+        e.preventDefault();
+        col.classList.remove('drop-target');
+        const id = e.dataTransfer.getData('text/plain') || draggingId;
+        if (id) {
+          DB.setState(id, stateKey);
+          if (stateKey === 'done') launchConfetti();
+          refresh();
+        }
+      });
+
+      col.appendChild(body);
+      board.appendChild(col);
+    });
   },
 
   clearCompleted() {
@@ -2025,6 +2279,18 @@ function bindEvents() {
   $('todo-input').addEventListener('keydown', e => { if(e.key==='Enter') Todos.add(); });
   $('clear-btn').addEventListener('click',  () => Todos.clearCompleted());
   $('file-input').addEventListener('change', () => Photos.handleFiles(Array.from($('file-input').files)));
+
+  /* Search */
+  const searchInp = $('search-input');
+  if (searchInp) searchInp.addEventListener('input', () => {
+    Todos.searchQuery = searchInp.value.trim();
+    Todos.render();
+  });
+
+  /* View toggle */
+  document.querySelectorAll('.vt-btn').forEach(b =>
+    b.addEventListener('click', () => Todos.setView(b.dataset.view))
+  );
 
   /* State filter chips */
   document.querySelectorAll('.sf-btn').forEach(b =>
