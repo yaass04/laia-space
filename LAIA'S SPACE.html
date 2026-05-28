@@ -938,6 +938,36 @@
   .assignee-avatar:hover { transform:scale(1.12); }
 
   /* Sort bar */
+  /* ── Analytics ──────────────────────────────────────────── */
+  .streak-row { display:flex; align-items:center; gap:.75rem; margin-bottom:.9rem; padding:.6rem .8rem; background:rgba(232,160,48,0.07); border:1px solid rgba(232,160,48,0.18); border-radius:13px; }
+  .streak-fire { font-size:1.5rem; line-height:1; }
+  .streak-cur  { flex:1; }
+  .streak-num  { font-size:1.55rem; font-weight:900; color:var(--accent); line-height:1; }
+  .streak-lbl  { font-size:.65rem; font-weight:700; color:var(--text-muted); letter-spacing:.06em; text-transform:uppercase; }
+  .streak-best { text-align:right; }
+  .streak-best-num { font-size:.9rem; font-weight:800; color:var(--text-muted); }
+  .streak-best-lbl { font-size:.6rem; font-weight:700; color:var(--text-dim); letter-spacing:.06em; text-transform:uppercase; }
+
+  .an-section { margin-bottom:.9rem; }
+  .an-label   { font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); margin-bottom:.45rem; }
+
+  .heatmap-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:3px; margin-bottom:.35rem; }
+  .hmap-week    { display:flex; flex-direction:column; gap:3px; }
+  .hmap-cell    { width:100%; aspect-ratio:1; border-radius:3px; background:rgba(255,255,255,0.05); transition:opacity .15s; cursor:default; }
+  .hmap-cell:hover { opacity:.75; }
+  .heatmap-legend { display:flex; align-items:center; gap:5px; justify-content:flex-end; font-size:.6rem; color:var(--text-dim); }
+  .heatmap-legend .hmap-cell { width:9px; height:9px; flex-shrink:0; }
+
+  .bar-chart-wrap { width:100%; overflow:hidden; }
+  .bar-chart-svg  { width:100%; display:block; }
+
+  .donuts-row { display:flex; gap:.75rem; justify-content:center; }
+  .donut-wrap { display:flex; flex-direction:column; align-items:center; gap:.35rem; }
+  .donut-lbl  { font-size:.62rem; font-weight:700; color:var(--text-muted); letter-spacing:.04em; text-transform:uppercase; }
+  .donut-legend { display:flex; flex-direction:column; gap:.2rem; margin-top:.2rem; }
+  .donut-leg-item { display:flex; align-items:center; gap:.3rem; font-size:.62rem; color:var(--text-muted); }
+  .donut-leg-dot  { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+
   /* ── Project header (shown when a project is active) ────── */
   .project-header {
     display:flex; align-items:center; gap:1rem;
@@ -1217,6 +1247,38 @@
         <div class="stat"><div class="stat-num" id="s-inprogress">0</div><div class="stat-label">En curs</div></div>
         <div class="stat overdue-stat"><div class="stat-num" id="s-overdue">0</div><div class="stat-label">Vencudes</div></div>
         <div class="stat"><div class="stat-num" id="s-today">0</div><div class="stat-label">Avui</div></div>
+      </div>
+    </div>
+
+    <!-- Analítiques -->
+    <div class="card">
+      <div class="card-title">
+        <svg class="paw-icon" viewBox="0 0 100 100"><ellipse cx="50" cy="63" rx="24" ry="20"/><ellipse cx="19" cy="43" rx="12" ry="14"/><ellipse cx="37" cy="28" rx="12" ry="14"/><ellipse cx="63" cy="28" rx="12" ry="14"/><ellipse cx="81" cy="43" rx="12" ry="14"/></svg>
+        Analítiques
+      </div>
+      <!-- Streak -->
+      <div id="streak-row" class="streak-row"></div>
+      <!-- Heatmap -->
+      <div class="an-section">
+        <div class="an-label">Activitat · últimes 12 setmanes</div>
+        <div id="heatmap-grid" class="heatmap-grid"></div>
+        <div class="heatmap-legend">
+          <span>Menys</span>
+          <div class="hmap-cell" style="background:rgba(255,255,255,0.06)"></div>
+          <div class="hmap-cell" style="background:rgba(232,160,48,0.25)"></div>
+          <div class="hmap-cell" style="background:rgba(232,160,48,0.55)"></div>
+          <div class="hmap-cell" style="background:rgba(232,160,48,0.9)"></div>
+          <span>Més</span>
+        </div>
+      </div>
+      <!-- 7-day bar chart -->
+      <div class="an-section">
+        <div class="an-label">Completades · últims 7 dies</div>
+        <div id="bar-chart-wrap" class="bar-chart-wrap"></div>
+      </div>
+      <!-- Donut charts -->
+      <div class="an-section">
+        <div class="donuts-row" id="donuts-row"></div>
       </div>
     </div>
 
@@ -2319,6 +2381,230 @@ const Stats = {
   },
 };
 
+/* ─── ANALYTICS ─────────────────────────────────────────────── */
+const Analytics = {
+
+  render() {
+    const todos = DB.getTodos();
+    this._renderStreak(todos);
+    this._renderHeatmap(todos);
+    this._renderBarChart(todos);
+    this._renderDonuts(todos);
+  },
+
+  /* ── Streak ─────────────────────────────────────────────── */
+  _streak(todos) {
+    const doneSet = new Set(
+      todos.filter(t => t.completedAt)
+           .map(t => t.completedAt.slice(0, 10))
+    );
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    /* Current streak: walk back from today */
+    let cur = 0;
+    const d = new Date();
+    // allow today to not have completions yet (start check from yesterday if today is empty)
+    if (!doneSet.has(todayStr)) d.setDate(d.getDate() - 1);
+    while (true) {
+      const ds = d.toISOString().slice(0, 10);
+      if (doneSet.has(ds)) { cur++; d.setDate(d.getDate() - 1); }
+      else break;
+    }
+
+    /* Best streak: scan all dates */
+    const sorted = [...doneSet].sort();
+    let best = 0, run = 0, prev = null;
+    for (const ds of sorted) {
+      if (prev) {
+        const diff = (new Date(ds) - new Date(prev)) / 86400000;
+        run = diff === 1 ? run + 1 : 1;
+      } else { run = 1; }
+      if (run > best) best = run;
+      prev = ds;
+    }
+    return { cur, best };
+  },
+
+  _renderStreak(todos) {
+    const { cur, best } = this._streak(todos);
+    const row = $('streak-row');
+    if (!row) return;
+    row.innerHTML = `
+      <div class="streak-fire">${cur >= 3 ? '🔥' : cur >= 1 ? '✨' : '💤'}</div>
+      <div class="streak-cur">
+        <div class="streak-num">${cur}</div>
+        <div class="streak-lbl">dies seguits</div>
+      </div>
+      <div class="streak-best">
+        <div class="streak-best-num">🏆 ${best}</div>
+        <div class="streak-best-lbl">rècord</div>
+      </div>`;
+  },
+
+  /* ── Heatmap (12 weeks) ──────────────────────────────────── */
+  _renderHeatmap(todos) {
+    const grid = $('heatmap-grid');
+    if (!grid) return;
+
+    /* Count completions per day */
+    const counts = {};
+    todos.filter(t => t.completedAt).forEach(t => {
+      const d = t.completedAt.slice(0, 10);
+      counts[d] = (counts[d] || 0) + 1;
+    });
+
+    /* Build 12 weeks starting from Monday 12 weeks ago */
+    const today   = new Date();
+    const dayOfW  = (today.getDay() + 6) % 7; // Monday = 0
+    const start   = new Date(today);
+    start.setDate(today.getDate() - dayOfW - 11 * 7);
+
+    grid.innerHTML = '';
+    for (let w = 0; w < 12; w++) {
+      const weekDiv = document.createElement('div');
+      weekDiv.className = 'hmap-week';
+      for (let day = 0; day < 7; day++) {
+        const d    = new Date(start);
+        d.setDate(start.getDate() + w * 7 + day);
+        const ds   = d.toISOString().slice(0, 10);
+        const n    = counts[ds] || 0;
+        const cell = document.createElement('div');
+        cell.className = 'hmap-cell';
+        cell.style.background = n === 0 ? 'rgba(255,255,255,0.05)'
+          : n <= 2 ? 'rgba(232,160,48,0.25)'
+          : n <= 5 ? 'rgba(232,160,48,0.55)'
+          : 'rgba(232,160,48,0.9)';
+        cell.title = `${ds}: ${n} completada${n !== 1 ? 'es' : ''}`;
+        weekDiv.appendChild(cell);
+      }
+      grid.appendChild(weekDiv);
+    }
+  },
+
+  /* ── 7-day bar chart ────────────────────────────────────── */
+  _renderBarChart(todos) {
+    const wrap = $('bar-chart-wrap');
+    if (!wrap) return;
+
+    const days   = ['Dl','Dt','Dc','Dj','Dv','Ds','Dg'];
+    const counts = [];
+    const labels = [];
+    const today  = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d  = new Date(today);
+      d.setDate(today.getDate() - i);
+      const ds = d.toISOString().slice(0, 10);
+      const n  = todos.filter(t => t.completedAt && t.completedAt.slice(0, 10) === ds).length;
+      counts.push(n);
+      labels.push(days[(d.getDay() + 6) % 7]);
+    }
+
+    const maxVal = Math.max(...counts, 1);
+    const W = 280, H = 70, barW = 28, gap = 12, pad = 4;
+    const totalW = 7 * barW + 6 * gap;
+    const startX = (W - totalW) / 2;
+    const chartH = H - 18; // reserve 18px for labels
+
+    let bars = '';
+    counts.forEach((n, i) => {
+      const bh   = Math.max(n > 0 ? 3 : 0, Math.round((n / maxVal) * chartH));
+      const x    = startX + i * (barW + gap);
+      const y    = pad + chartH - bh;
+      const fill = n > 0 ? (i === 6 ? 'rgba(232,160,48,0.9)' : 'rgba(232,160,48,0.45)') : 'rgba(255,255,255,0.05)';
+      bars += `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" rx="5" fill="${fill}"/>`;
+      if (n > 0) bars += `<text x="${x + barW/2}" y="${y - 3}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.55)" font-family="inherit">${n}</text>`;
+      bars += `<text x="${x + barW/2}" y="${H - 2}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.28)" font-family="inherit">${labels[i]}</text>`;
+    });
+
+    wrap.innerHTML = `<svg class="bar-chart-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${bars}</svg>`;
+  },
+
+  /* ── Donut charts ───────────────────────────────────────── */
+  _donutSVG(slices, size) {
+    const total = slices.reduce((s, sl) => s + sl.value, 0);
+    if (total === 0) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 6}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="10"/>
+      </svg>`;
+    }
+    const r = size / 2 - 6, cx = size / 2, cy = size / 2;
+    const circ = 2 * Math.PI * r;
+    let offset = 0;
+    let paths  = '';
+    for (const sl of slices) {
+      const dash = (sl.value / total) * circ;
+      paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${sl.color}" stroke-width="10"
+        stroke-dasharray="${dash.toFixed(2)} ${circ.toFixed(2)}"
+        stroke-dashoffset="${(-offset).toFixed(2)}"
+        transform="rotate(-90 ${cx} ${cy})"/>`;
+      offset += dash;
+    }
+    const pct = Math.round((slices.find(s => s.key === 'done' || s.key === 'urgent' || s.isMain)?.value || slices[0]?.value || 0) / total * 100);
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="10"/>
+      ${paths}
+      <text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="10" font-weight="800" fill="rgba(255,255,255,0.7)" font-family="inherit">${pct}%</text>
+    </svg>`;
+  },
+
+  _renderDonuts(todos) {
+    const row = $('donuts-row');
+    if (!row) return;
+    row.innerHTML = '';
+
+    /* State donut */
+    const stateSlices = [
+      { key:'todo',       value: todos.filter(t=>t.state==='todo').length,       color: 'rgba(255,255,255,0.35)', isMain:false },
+      { key:'inprogress', value: todos.filter(t=>t.state==='inprogress').length, color: '#60A5FA', isMain:false },
+      { key:'inreview',   value: todos.filter(t=>t.state==='inreview').length,   color: '#C084FC', isMain:false },
+      { key:'done',       value: todos.filter(t=>t.state==='done').length,       color: '#4ADE80', isMain:true },
+    ].filter(s => s.value > 0);
+
+    /* Priority donut (pending only) */
+    const pending = todos.filter(t => t.state !== 'done');
+    const prioSlices = [
+      { key:'urgent', value: pending.filter(t=>t.priority==='urgent').length, color: '#FF5C5C', isMain:true },
+      { key:'high',   value: pending.filter(t=>t.priority==='high').length,   color: '#FB923C', isMain:false },
+      { key:'normal', value: pending.filter(t=>t.priority==='normal').length, color: '#94A3B8', isMain:false },
+      { key:'low',    value: pending.filter(t=>t.priority==='low').length,    color: '#4ADE80', isMain:false },
+    ].filter(s => s.value > 0);
+
+    const SZ = 68;
+
+    /* Build state donut */
+    const sd = document.createElement('div');
+    sd.className = 'donut-wrap';
+    sd.innerHTML = `<div class="donut-lbl">Estat</div>${this._donutSVG(stateSlices, SZ)}`;
+    const sdLeg = document.createElement('div'); sdLeg.className = 'donut-legend';
+    [{ label:'Per fer', color:'rgba(255,255,255,0.35)' },
+     { label:'En curs', color:'#60A5FA' },
+     { label:'Revisió', color:'#C084FC' },
+     { label:'Fetes',   color:'#4ADE80' }].forEach(({label,color}) => {
+      const item = document.createElement('div'); item.className='donut-leg-item';
+      item.innerHTML=`<div class="donut-leg-dot" style="background:${color}"></div><span>${label}</span>`;
+      sdLeg.appendChild(item);
+    });
+    sd.appendChild(sdLeg);
+    row.appendChild(sd);
+
+    /* Build priority donut */
+    const pd = document.createElement('div');
+    pd.className = 'donut-wrap';
+    pd.innerHTML = `<div class="donut-lbl">Prioritat</div>${this._donutSVG(prioSlices, SZ)}`;
+    const pdLeg = document.createElement('div'); pdLeg.className = 'donut-legend';
+    [{ label:'Urgent', color:'#FF5C5C' },
+     { label:'Alta',   color:'#FB923C' },
+     { label:'Normal', color:'#94A3B8' },
+     { label:'Baixa',  color:'#4ADE80' }].forEach(({label,color}) => {
+      const item = document.createElement('div'); item.className='donut-leg-item';
+      item.innerHTML=`<div class="donut-leg-dot" style="background:${color}"></div><span>${label}</span>`;
+      pdLeg.appendChild(item);
+    });
+    pd.appendChild(pdLeg);
+    row.appendChild(pd);
+  },
+};
+
 /* ─── LISTS / PROJECTS ───────────────────────────────────────── */
 const Lists = {
   active    : null,
@@ -2992,7 +3278,7 @@ const Photos = {
 };
 
 /* ─── REFRESH ────────────────────────────────────────────────── */
-function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); Lists.renderProjectHeader(); Users.render(); }
+function refresh() { Calendar.render(); Todos.render(); Stats.render(); Lists.render(); Lists.renderProjectHeader(); Users.render(); Analytics.render(); }
 
 /* ─── EVENT BINDING ──────────────────────────────────────────── */
 function bindEvents() {
