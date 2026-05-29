@@ -1822,7 +1822,8 @@
     <!-- Notes + markdown preview -->
     <div class="detail-section">
       <div class="detail-section-hdr">
-        <span>📝 Notes</span>
+        <svg style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>Notes</span>
         <button class="det-tab active" id="det-edit-tab"  data-tab="edit">Editar</button>
         <button class="det-tab"        id="det-prev-tab"  data-tab="preview">Previsualitza</button>
       </div>
@@ -1831,7 +1832,10 @@
     </div>
     <!-- Comments -->
     <div class="detail-section">
-      <div class="detail-section-hdr"><span>💬 Comentaris</span></div>
+      <div class="detail-section-hdr">
+        <svg style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Comentaris</span>
+      </div>
       <div class="comment-list" id="det-comments"></div>
       <div class="comment-add">
         <textarea class="comment-input" id="det-comment-input" placeholder="Escriu un comentari…" rows="2"></textarea>
@@ -1863,14 +1867,16 @@
     </select>
   </div>
   <div class="bulk-sep"></div>
-  <button class="bulk-del" id="bulk-del">🗑 Eliminar</button>
+  <button class="bulk-del" id="bulk-del">Eliminar</button>
   <button class="bulk-cancel" id="bulk-cancel" title="Cancel·lar selecció">✕</button>
 </div>
 
 <!-- ══ EVENT MODAL ════════════════════════════════════════════ -->
 <div id="ev-overlay" class="ev-overlay"></div>
 <div id="ev-modal" class="ev-modal" role="dialog" aria-modal="true">
-  <div class="ev-modal-hdr">📅 Esdeveniment</div>
+  <div class="ev-modal-hdr">
+    <svg style="width:13px;height:13px;stroke:var(--accent);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle;margin-right:5px" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Esdeveniment
+  </div>
   <div class="ev-field">
     <label>Títol</label>
     <input type="text" id="ev-title" placeholder="Nom de l'esdeveniment…" maxlength="80" />
@@ -1908,7 +1914,7 @@
   <div class="ev-modal-btns">
     <button class="ev-save-btn"   id="ev-save-btn">Guardar</button>
     <button class="ev-cancel-btn" id="ev-cancel-btn">Cancel·lar</button>
-    <button class="ev-del-btn"    id="ev-del-btn" style="display:none">🗑</button>
+    <button class="ev-del-btn"    id="ev-del-btn" style="display:none">Eliminar</button>
   </div>
 </div>
 
@@ -1970,18 +1976,18 @@ const TAGS = {
 
 /* Fase 1 v2 — estats de tasca */
 const STATES = {
-  todo      : { label:'Per fer',    icon:'○', color:'rgba(255,255,255,0.55)', bg:'rgba(255,255,255,0.07)',  border:'rgba(255,255,255,0.18)' },
-  inprogress: { label:'En curs',    icon:'◑', color:'#60A5FA',               bg:'rgba(59,130,246,0.14)',   border:'rgba(59,130,246,0.4)'   },
-  inreview  : { label:'En revisió', icon:'◐', color:'#C084FC',               bg:'rgba(168,85,247,0.14)',   border:'rgba(168,85,247,0.4)'   },
-  done      : { label:'Feta',       icon:'●', color:'#4ADE80',               bg:'rgba(74,222,128,0.14)',   border:'rgba(74,222,128,0.4)'   },
+  todo      : { label:'Per fer',    icon:'○', color:'#64748B', bg:'rgba(100,116,139,0.10)', border:'rgba(100,116,139,0.28)' },
+  inprogress: { label:'En curs',    icon:'◑', color:'#2563EB', bg:'rgba(37,99,235,0.10)',   border:'rgba(37,99,235,0.32)'   },
+  inreview  : { label:'En revisió', icon:'◐', color:'#7C3AED', bg:'rgba(124,58,237,0.10)',  border:'rgba(124,58,237,0.32)'  },
+  done      : { label:'Feta',       icon:'●', color:'#16A34A', bg:'rgba(22,163,74,0.10)',   border:'rgba(22,163,74,0.32)'   },
 };
 
 /* Fase 1 v2 — prioritats (4 nivells) */
 const PRIORITIES = {
-  low   : { label:'Baixa',  icon:'↓', color:'#4ADE80', bg:'rgba(74,222,128,0.12)',  border:'rgba(74,222,128,0.35)'  },
-  normal: { label:'Normal', icon:'–', color:'#94A3B8', bg:'rgba(148,163,184,0.1)',  border:'rgba(148,163,184,0.3)'  },
-  high  : { label:'Alta',   icon:'↑', color:'#FB923C', bg:'rgba(251,146,60,0.12)',  border:'rgba(251,146,60,0.35)'  },
-  urgent: { label:'Urgent', icon:'‼', color:'#FF5C5C', bg:'rgba(255,92,92,0.12)',   border:'rgba(255,92,92,0.4)'    },
+  low   : { label:'Baixa',  icon:'↓', color:'#16A34A', bg:'rgba(22,163,74,0.09)',   border:'rgba(22,163,74,0.30)'   },
+  normal: { label:'Normal', icon:'–', color:'#64748B', bg:'rgba(100,116,139,0.08)', border:'rgba(100,116,139,0.25)' },
+  high  : { label:'Alta',   icon:'↑', color:'#EA580C', bg:'rgba(234,88,12,0.10)',   border:'rgba(234,88,12,0.32)'   },
+  urgent: { label:'Urgent', icon:'‼', color:'#DC2626', bg:'rgba(220,38,38,0.10)',   border:'rgba(220,38,38,0.35)'   },
 };
 
 /* Sort options */
@@ -2494,7 +2500,7 @@ const Todos = {
       const btn = document.createElement('button');
       btn.className   = 'tag-filter-btn' + (this.activeTag===key ? ' active' : '');
       btn.dataset.tag = key;
-      btn.textContent = `${t.emoji} ${t.label}`;
+      btn.textContent = t.label;
       btn.style.cssText = `color:${t.color};border-color:${t.color}44`;
       btn.addEventListener('click', () => {
         this.activeTag = this.activeTag===key ? null : key;
@@ -2653,7 +2659,7 @@ const Todos = {
       if (isOverdue) {
         const b = document.createElement('span');
         b.className = 'badge-overdue';
-        b.textContent = '⚠ Vençuda';
+        b.textContent = '! Vençuda';
         meta.appendChild(b);
       }
 
@@ -2905,7 +2911,7 @@ const Todos = {
             const ob = document.createElement('span');
             ob.className   = 'badge-overdue';
             ob.style.fontSize = '.62rem';
-            ob.textContent = '⚠';
+            ob.textContent = '!';
             meta.appendChild(ob);
           }
           if (todo.date) {
@@ -3040,14 +3046,17 @@ const Analytics = {
     const { cur, best } = this._streak(todos);
     const row = $('streak-row');
     if (!row) return;
+    const flameIcon = `<svg class="streak-fire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 0 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>`;
+    const moonIcon  = `<svg class="streak-fire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-dim)"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+    const trophyIcon = `<svg style="width:15px;height:15px;stroke:var(--text-muted);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0" viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>`;
     row.innerHTML = `
-      <div class="streak-fire">${cur >= 3 ? '🔥' : cur >= 1 ? '✨' : '💤'}</div>
+      ${cur > 0 ? flameIcon : moonIcon}
       <div class="streak-cur">
         <div class="streak-num">${cur}</div>
         <div class="streak-lbl">dies seguits</div>
       </div>
       <div class="streak-best">
-        <div class="streak-best-num">🏆 ${best}</div>
+        <div class="streak-best-num" style="display:flex;align-items:center;gap:4px;justify-content:flex-end">${trophyIcon} ${best}</div>
         <div class="streak-best-lbl">rècord</div>
       </div>`;
   },
@@ -3081,9 +3090,9 @@ const Analytics = {
         const n    = counts[ds] || 0;
         const cell = document.createElement('div');
         cell.className = 'hmap-cell';
-        cell.style.background = n === 0 ? 'rgba(255,255,255,0.05)'
-          : n <= 2 ? 'rgba(232,160,48,0.25)'
-          : n <= 5 ? 'rgba(232,160,48,0.55)'
+        cell.style.background = n === 0 ? 'rgba(0,0,0,0.07)'
+          : n <= 2 ? 'rgba(232,160,48,0.30)'
+          : n <= 5 ? 'rgba(232,160,48,0.60)'
           : 'rgba(232,160,48,0.9)';
         cell.title = `${ds}: ${n} completada${n !== 1 ? 'es' : ''}`;
         weekDiv.appendChild(cell);
@@ -3121,10 +3130,10 @@ const Analytics = {
       const bh   = Math.max(n > 0 ? 3 : 0, Math.round((n / maxVal) * chartH));
       const x    = startX + i * (barW + gap);
       const y    = pad + chartH - bh;
-      const fill = n > 0 ? (i === 6 ? 'rgba(232,160,48,0.9)' : 'rgba(232,160,48,0.45)') : 'rgba(255,255,255,0.05)';
+      const fill = n > 0 ? (i === 6 ? 'rgba(232,160,48,0.9)' : 'rgba(232,160,48,0.5)') : 'rgba(0,0,0,0.07)';
       bars += `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" rx="5" fill="${fill}"/>`;
-      if (n > 0) bars += `<text x="${x + barW/2}" y="${y - 3}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.55)" font-family="inherit">${n}</text>`;
-      bars += `<text x="${x + barW/2}" y="${H - 2}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.28)" font-family="inherit">${labels[i]}</text>`;
+      if (n > 0) bars += `<text x="${x + barW/2}" y="${y - 3}" text-anchor="middle" font-size="8" fill="rgba(0,0,0,0.50)" font-family="inherit">${n}</text>`;
+      bars += `<text x="${x + barW/2}" y="${H - 2}" text-anchor="middle" font-size="9" fill="rgba(0,0,0,0.35)" font-family="inherit">${labels[i]}</text>`;
     });
 
     wrap.innerHTML = `<svg class="bar-chart-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${bars}</svg>`;
@@ -3135,7 +3144,7 @@ const Analytics = {
     const total = slices.reduce((s, sl) => s + sl.value, 0);
     if (total === 0) {
       return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-        <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 6}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="10"/>
+        <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 6}" fill="none" stroke="rgba(0,0,0,0.07)" stroke-width="10"/>
       </svg>`;
     }
     const r = size / 2 - 6, cx = size / 2, cy = size / 2;
@@ -3152,9 +3161,9 @@ const Analytics = {
     }
     const pct = Math.round((slices.find(s => s.key === 'done' || s.key === 'urgent' || s.isMain)?.value || slices[0]?.value || 0) / total * 100);
     return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="10"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(0,0,0,0.07)" stroke-width="10"/>
       ${paths}
-      <text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="10" font-weight="800" fill="rgba(255,255,255,0.7)" font-family="inherit">${pct}%</text>
+      <text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="10" font-weight="800" fill="rgba(0,0,0,0.55)" font-family="inherit">${pct}%</text>
     </svg>`;
   },
 
@@ -3165,19 +3174,19 @@ const Analytics = {
 
     /* State donut */
     const stateSlices = [
-      { key:'todo',       value: todos.filter(t=>t.state==='todo').length,       color: 'rgba(255,255,255,0.35)', isMain:false },
-      { key:'inprogress', value: todos.filter(t=>t.state==='inprogress').length, color: '#60A5FA', isMain:false },
-      { key:'inreview',   value: todos.filter(t=>t.state==='inreview').length,   color: '#C084FC', isMain:false },
-      { key:'done',       value: todos.filter(t=>t.state==='done').length,       color: '#4ADE80', isMain:true },
+      { key:'todo',       value: todos.filter(t=>t.state==='todo').length,       color: '#94A3B8', isMain:false },
+      { key:'inprogress', value: todos.filter(t=>t.state==='inprogress').length, color: '#3B82F6', isMain:false },
+      { key:'inreview',   value: todos.filter(t=>t.state==='inreview').length,   color: '#8B5CF6', isMain:false },
+      { key:'done',       value: todos.filter(t=>t.state==='done').length,       color: '#22C55E', isMain:true },
     ].filter(s => s.value > 0);
 
     /* Priority donut (pending only) */
     const pending = todos.filter(t => t.state !== 'done');
     const prioSlices = [
-      { key:'urgent', value: pending.filter(t=>t.priority==='urgent').length, color: '#FF5C5C', isMain:true },
-      { key:'high',   value: pending.filter(t=>t.priority==='high').length,   color: '#FB923C', isMain:false },
+      { key:'urgent', value: pending.filter(t=>t.priority==='urgent').length, color: '#DC2626', isMain:true },
+      { key:'high',   value: pending.filter(t=>t.priority==='high').length,   color: '#EA580C', isMain:false },
       { key:'normal', value: pending.filter(t=>t.priority==='normal').length, color: '#94A3B8', isMain:false },
-      { key:'low',    value: pending.filter(t=>t.priority==='low').length,    color: '#4ADE80', isMain:false },
+      { key:'low',    value: pending.filter(t=>t.priority==='low').length,    color: '#16A34A', isMain:false },
     ].filter(s => s.value > 0);
 
     const SZ = 68;
@@ -3187,10 +3196,10 @@ const Analytics = {
     sd.className = 'donut-wrap';
     sd.innerHTML = `<div class="donut-lbl">Estat</div>${this._donutSVG(stateSlices, SZ)}`;
     const sdLeg = document.createElement('div'); sdLeg.className = 'donut-legend';
-    [{ label:'Per fer', color:'rgba(255,255,255,0.35)' },
-     { label:'En curs', color:'#60A5FA' },
-     { label:'Revisió', color:'#C084FC' },
-     { label:'Fetes',   color:'#4ADE80' }].forEach(({label,color}) => {
+    [{ label:'Per fer', color:'#94A3B8' },
+     { label:'En curs', color:'#3B82F6' },
+     { label:'Revisió', color:'#8B5CF6' },
+     { label:'Fetes',   color:'#22C55E' }].forEach(({label,color}) => {
       const item = document.createElement('div'); item.className='donut-leg-item';
       item.innerHTML=`<div class="donut-leg-dot" style="background:${color}"></div><span>${label}</span>`;
       sdLeg.appendChild(item);
@@ -3203,10 +3212,10 @@ const Analytics = {
     pd.className = 'donut-wrap';
     pd.innerHTML = `<div class="donut-lbl">Prioritat</div>${this._donutSVG(prioSlices, SZ)}`;
     const pdLeg = document.createElement('div'); pdLeg.className = 'donut-legend';
-    [{ label:'Urgent', color:'#FF5C5C' },
-     { label:'Alta',   color:'#FB923C' },
+    [{ label:'Urgent', color:'#DC2626' },
+     { label:'Alta',   color:'#EA580C' },
      { label:'Normal', color:'#94A3B8' },
-     { label:'Baixa',  color:'#4ADE80' }].forEach(({label,color}) => {
+     { label:'Baixa',  color:'#16A34A' }].forEach(({label,color}) => {
       const item = document.createElement('div'); item.className='donut-leg-item';
       item.innerHTML=`<div class="donut-leg-dot" style="background:${color}"></div><span>${label}</span>`;
       pdLeg.appendChild(item);
@@ -3250,7 +3259,7 @@ const Lists = {
     /* "Totes" button */
     const allBtn = document.createElement('button');
     allBtn.className = 'list-all-btn' + (this.active === null ? ' active' : '');
-    allBtn.innerHTML = '📋 <span>Totes les tasques</span>';
+    allBtn.innerHTML = '<svg style="width:13px;height:13px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Totes les tasques</span>';
     allBtn.addEventListener('click', () => this.select(null));
     container.appendChild(allBtn);
 
@@ -3376,10 +3385,10 @@ const Lists = {
     /* Stats chips */
     const chips = $('proj-stats-chips');
     chips.innerHTML = `
-      <span class="proj-stat-chip" style="color:var(--text-muted)">📊 ${total} total</span>
-      <span class="proj-stat-chip" style="color:#4ADE80">✓ ${done} fetes</span>
-      ${prog  ? `<span class="proj-stat-chip" style="color:#60A5FA">◑ ${prog} en curs</span>` : ''}
-      ${total > done ? `<span class="proj-stat-chip" style="color:var(--accent)">○ ${total-done} pendents</span>` : ''}
+      <span class="proj-stat-chip" style="color:var(--text-muted)">${total} total</span>
+      <span class="proj-stat-chip" style="color:#16A34A">${done} fetes</span>
+      ${prog  ? `<span class="proj-stat-chip" style="color:#2563EB">${prog} en curs</span>` : ''}
+      ${total > done ? `<span class="proj-stat-chip" style="color:var(--accent)">${total-done} pendents</span>` : ''}
     `;
 
     hdr.style.display = 'flex';
@@ -3480,7 +3489,7 @@ const Lists = {
     const sel    = $('todo-list');
     const curVal = sel.value;
     const lists  = DB.getLists();
-    sel.innerHTML = '<option value="">📋 Cap projecte</option>';
+    sel.innerHTML = '<option value="">Cap projecte</option>';
     lists.forEach(l => {
       const opt = document.createElement('option');
       opt.value       = l.id;
@@ -3666,7 +3675,7 @@ const Detail = {
     // Date field
     const dateF = document.createElement('label');
     dateF.className = 'det-field';
-    dateF.innerHTML = `📅 <input type="date" value="${todo.date || ''}" />`;
+    dateF.innerHTML = `<svg style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><input type="date" value="${todo.date || ''}" />`;
     dateF.querySelector('input').onchange = e => {
       DB.updateTodo(this._id, { date: e.target.value || null });
       refresh();
@@ -3676,7 +3685,7 @@ const Detail = {
     // Time field
     const timeF = document.createElement('label');
     timeF.className = 'det-field';
-    timeF.innerHTML = `⏰ <input type="time" value="${todo.time || ''}" />`;
+    timeF.innerHTML = `<svg style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><input type="time" value="${todo.time || ''}" />`;
     timeF.querySelector('input').onchange = e => {
       DB.updateTodo(this._id, { time: e.target.value || null });
       refresh();
@@ -3703,7 +3712,7 @@ const Detail = {
     if (lists.length > 0) {
       const lF = document.createElement('label');
       lF.className = 'det-field';
-      const lOpts = `<option value="">📋 Cap llista</option>` +
+      const lOpts = `<option value="">Cap llista</option>` +
         lists.map(l => `<option value="${l.id}"${todo.list_id===l.id?' selected':''}>${l.emoji} ${l.name}</option>`).join('');
       lF.innerHTML = `<select>${lOpts}</select>`;
       lF.querySelector('select').onchange = e => {
@@ -3866,7 +3875,7 @@ const Photos = {
     if (!full) {
       const add = document.createElement('div');
       add.className = 'photo-add';
-      add.innerHTML = `<span class="pa-icon">📷</span><span class="pa-txt">Afegir foto</span>`;
+      add.innerHTML = `<svg style="width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span class="pa-txt">Afegir foto</span>`;
       add.addEventListener('click', () => $('file-input').click());
       grid.appendChild(add);
     }
